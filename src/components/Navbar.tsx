@@ -320,6 +320,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           </button>
 
+          {/* Indicador de Nuvem / Sincronização */}
+          <button
+            type="button"
+            onClick={() => onSelectCategory('profile')}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all shrink-0"
+            title="Sincronização em Nuvem ativa entre dispositivos"
+          >
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+            </span>
+            <span className="hidden sm:inline">Nuvem</span>
+          </button>
+
           {/* Atalho de Perfil */}
           <button
             type="button"

@@ -48,16 +48,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Duração autoritativa de referência (TMDB metadata para filme ou episódio)
+  const authoritativeDuration = React.useMemo(() => {
+    if (episode?.durationMinutes && episode.durationMinutes > 0) {
+      return episode.durationMinutes * 60;
+    }
+    if (media.runtime && media.runtime > 0) {
+      return media.runtime * 60;
+    }
+    if (media.media_type === 'tv' || media.media_type === 'anime') {
+      return 24 * 60;
+    }
+    return 115 * 60; // 115 min padrão para longa-metragem
+  }, [media, episode]);
+
   // Estados de Reprodução
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(initialTime);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState<number>(authoritativeDuration);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isBuffering, setIsBuffering] = useState(true);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [retryAttempts, setRetryAttempts] = useState(0);
 
   // Modo Apenas Áudio
   const [isAudioOnly, setIsAudioOnly] = useState(false);
@@ -259,20 +275,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onLoadedMetadata={() => {
           setIsBuffering(false);
           if (videoRef.current) {
-            setDuration(videoRef.current.duration || 0);
+            const rawDur = videoRef.current.duration;
+            if (rawDur && isFinite(rawDur) && rawDur > 120) {
+              setDuration(rawDur);
+            } else {
+              setDuration(authoritativeDuration);
+            }
             if (initialTime > 0) {
               videoRef.current.currentTime = initialTime;
             }
           }
         }}
+        onDurationChange={() => {
+          if (videoRef.current) {
+            const rawDur = videoRef.current.duration;
+            if (rawDur && isFinite(rawDur) && rawDur > 120) {
+              setDuration(rawDur);
+            }
+          }
+        }}
         onError={() => {
           setIsBuffering(false);
-          // Fallback resiliente caso o stream remoto falhe
-          if (!activeVideoSrc.includes('oceans.mp4')) {
-            setActiveVideoSrc('https://vjs.zencdn.net/v/oceans.mp4');
-          } else if (torrent.directUrl && activeVideoSrc !== torrent.directUrl) {
-            setActiveVideoSrc(torrent.directUrl);
+          // Tentativa de reconexão automática resiliente
+          if (retryAttempts < 2) {
+            console.log(`[VideoPlayer] Tentativa de reconexão do stream P2P ${retryAttempts + 1}/2...`);
+            setRetryAttempts((prev) => prev + 1);
+            setIsBuffering(true);
+            setTimeout(() => {
+              if (videoRef.current) {
+                const sep = activeVideoSrc.includes('?') ? '&' : '?';
+                setActiveVideoSrc(`${activeVideoSrc}${sep}_retry=${Date.now()}`);
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            }, 1200);
+            return;
           }
+
+          setPlaybackError(
+            `A fonte selecionada "${torrent.quality} ${torrent.format || 'WEB-DL'}" encontrou instabilidade nas sementes P2P. Tente reconectar ou selecione outra fonte disponível.`
+          );
         }}
       >
         {subtitleUrl && (
@@ -328,10 +370,49 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
 
       {/* Indicador de Buffering */}
-      {isBuffering && (
+      {isBuffering && !playbackError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none z-30">
           <div className="w-10 h-10 rounded-full border-2 border-white/20 border-t-white animate-spin mb-3" />
-          <span className="text-xs font-medium text-white/80">Carregando fluxo de vídeo...</span>
+          <span className="text-xs font-medium text-white/80">Conectando aos pares P2P...</span>
+        </div>
+      )}
+
+      {/* Diálogo de Erro / Troca de Fonte */}
+      {playbackError && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl animate-in fade-in">
+          <div className="max-w-md w-full glass-panel p-6 rounded-2xl border border-white/10 text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+              <Users className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Fonte P2P Indisponível</h3>
+              <p className="text-xs text-white/70 mt-1 leading-relaxed">
+                {playbackError}
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setPlaybackError(null);
+                  setIsBuffering(true);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                className="flex-1 py-2.5 px-4 bg-white hover:bg-neutral-200 text-black font-bold text-xs rounded-xl shadow-md transition-colors"
+              >
+                Tentar Novamente
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 py-2.5 px-4 glass-subtle hover:bg-white/10 text-white font-semibold text-xs rounded-xl border border-white/10 transition-colors"
+              >
+                Escolher Outra Fonte
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -391,7 +472,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <input
             type="range"
             min={0}
-            max={duration || 100}
+            max={duration > 0 ? duration : authoritativeDuration}
             value={currentTime}
             onChange={handleSeek}
             className="w-full h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white focus:outline-none"
@@ -465,7 +546,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <div className="text-[11px] sm:text-xs font-mono text-white/70">
               <span>{formatTime(currentTime)}</span>
               <span className="text-white/30"> / </span>
-              <span>{formatTime(duration)}</span>
+              <span>{formatTime(duration > 0 ? duration : authoritativeDuration)}</span>
             </div>
           </div>
 

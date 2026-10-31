@@ -23,13 +23,17 @@ import {
   Share2,
   Edit3,
   Camera,
-  Check
+  Check,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import { MediaItem, WatchHistoryItem, MovieRating, CustomList, UserProfile } from '../types/index.ts';
 import { letterboxdService } from '../services/letterboxd.ts';
 import { storageService } from '../services/storage.ts';
+import { cloudSync } from '../services/cloudSync.ts';
 import { MovieCard } from './MovieCard.tsx';
 import { LazyImage } from './LazyImage.tsx';
+import { SyncAccountModal } from './SyncAccountModal.tsx';
 
 interface ProfileViewProps {
   theme: 'dark' | 'light';
@@ -74,6 +78,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [newListName, setNewListName] = useState('');
   const [newListDesc, setNewListDesc] = useState('');
 
+  // Modal de Sincronização em Nuvem & Pareamento de Dispositivos
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncAccount, setSyncAccount] = useState(() => cloudSync.getAccount());
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+
   const reloadData = () => {
     setProfile(letterboxdService.getProfile());
     setWatchHistory(storageService.getWatchHistory());
@@ -86,6 +95,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   useEffect(() => {
     reloadData();
+
+    // Sincronização em tempo real quando os dados mudam em outros aparelhos ou abas
+    const handleStorageSynced = () => {
+      reloadData();
+    };
+    window.addEventListener('popoca_storage_synced', handleStorageSynced);
+
+    const unsubscribe = cloudSync.subscribe((state) => {
+      setSyncAccount(state.account);
+      setIsCloudSyncing(state.isSyncing);
+    });
+
+    return () => {
+      window.removeEventListener('popoca_storage_synced', handleStorageSynced);
+      unsubscribe();
+    };
   }, []);
 
   const handleSaveProfile = () => {
@@ -235,17 +260,34 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
-          {/* Exportar CSV Letterboxd */}
-          <div className="flex items-center gap-3 shrink-0">
+          {/* Ações de Conta & Nuvem */}
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <button
+              onClick={() => setShowSyncModal(true)}
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all ${
+                isLight
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+              }`}
+              title="Sincronização em Nuvem & Pareamento de Aparelhos"
+            >
+              <div className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </div>
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Nuvem Ativa</span>
+            </button>
+
             <button
               onClick={handleExportCSV}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl glass-subtle transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-xl glass-subtle transition-all ${
                 isLight ? 'hover:bg-slate-200 text-slate-800' : 'hover:bg-white/10 text-white/80 hover:text-white border border-white/10'
               }`}
               title="Baixar arquivo compatível com importação do Letterboxd"
             >
               <Download className="w-4 h-4" />
-              <span>Exportar CSV Letterboxd</span>
+              <span>Exportar CSV</span>
             </button>
           </div>
 
@@ -834,6 +876,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Sincronização em Nuvem & Pareamento */}
+      <SyncAccountModal
+        isOpen={showSyncModal}
+        onClose={() => setShowSyncModal(false)}
+        theme={theme}
+        onSyncCompleted={reloadData}
+      />
 
     </div>
   );

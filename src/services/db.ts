@@ -5,10 +5,10 @@
  * e proporcionando carregamento instantâneo da UI mesmo offline.
  */
 
-import { MediaItem } from '../types/index.ts';
+import { MediaItem, Episode } from '../types/index.ts';
 
 const DB_NAME = 'popoca_tmdb_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 Horas de validade de cache
 
 class PopocaIndexedDB {
@@ -42,6 +42,11 @@ class PopocaIndexedDB {
           // 3. Armazena resultados de busca global
           if (!db.objectStoreNames.contains('search_cache')) {
             db.createObjectStore('search_cache', { keyPath: 'query' });
+          }
+
+          // 4. Armazena temporadas e episódios carregados sob demanda (lazy-loading)
+          if (!db.objectStoreNames.contains('series_seasons')) {
+            db.createObjectStore('series_seasons', { keyPath: 'key' });
           }
         };
 
@@ -210,6 +215,58 @@ class PopocaIndexedDB {
       tx.objectStore('search_cache').put(record);
     } catch (e) {
       console.warn('[IndexedDB] Falha ao salvar busca em cache:', e);
+    }
+  }
+
+  // --- TEMPORADAS E EPISÓDIOS SOB DEMANDA (LAZY-LOADING) ---
+  async getCachedSeason(seriesId: number, seasonNumber: number): Promise<Episode[] | null> {
+    try {
+      const db = await this.getDB();
+      if (!db) return null;
+
+      const key = `${seriesId}_s${seasonNumber}`;
+      return new Promise((resolve) => {
+        const tx = db.transaction('series_seasons', 'readonly');
+        const store = tx.objectStore('series_seasons');
+        const req = store.get(key);
+
+        req.onsuccess = () => {
+          const record = req.result;
+          if (!record) return resolve(null);
+
+          const isExpired = Date.now() - record.timestamp > DEFAULT_TTL_MS;
+          if (isExpired) {
+            resolve(null);
+          } else {
+            resolve(record.episodes || null);
+          }
+        };
+
+        req.onerror = () => resolve(null);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async setCachedSeason(seriesId: number, seasonNumber: number, episodes: Episode[]): Promise<void> {
+    try {
+      const db = await this.getDB();
+      if (!db || !episodes || episodes.length === 0) return;
+
+      const key = `${seriesId}_s${seasonNumber}`;
+      const record = {
+        key,
+        seriesId,
+        seasonNumber,
+        episodes,
+        timestamp: Date.now()
+      };
+
+      const tx = db.transaction('series_seasons', 'readwrite');
+      tx.objectStore('series_seasons').put(record);
+    } catch (e) {
+      console.warn('[IndexedDB] Falha ao salvar temporada em cache:', e);
     }
   }
 }

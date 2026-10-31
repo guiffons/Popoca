@@ -102,3 +102,21 @@ export interface UserProfile {
   favoriteIds?: number[]; // Top 4 filmes favoritos (padrão Letterboxd)
 }
 
+export interface UserAccount {
+  userId: string;
+  email: string;
+  isAuthenticated: boolean;
+  isCloudSyncEnabled: boolean;
+  lastSyncedAt?: number;
+}
+
+export interface SyncData {
+  watchHistory: WatchHistoryItem[];
+  ratings: Record<number, MovieRating>;
+  watched: MediaItem[];
+  watchlist: MediaItem[];
+  liked: MediaItem[];
+  customLists: CustomList[];
+  profile: UserProfile;
+}
+

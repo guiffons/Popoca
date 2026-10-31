@@ -40,6 +40,9 @@ function safeGet<T>(key: string, fallbackKey?: string, defaultValue: T = [] as u
 function safeSet<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('popoca_storage_changed'));
+    }
   } catch (e) {
     console.warn(`Erro ao salvar ${key}:`, e);
   }

@@ -6,7 +6,7 @@
  * formatação exata de tamanho de arquivo (GB/MB) e proxy de streams HTTP 206.
  */
 
-import { MediaItem, TorrentSource } from '../types/index.ts';
+import { MediaItem, TorrentSource, Episode } from '../types/index.ts';
 import { idbService } from './db.ts';
 
 // Extrai e valida o infoHash de 40 caracteres hexadecimais a partir de magnet URI ou hash
@@ -81,15 +81,22 @@ export const api = {
       // no-op se IndexedDB falhar
     }
 
-    // 2. Busca na rede
-    const res = await fetch(`/api/catalog?category=${category}&page=${page}`);
-    if (!res.ok) throw new Error('Falha ao carregar catálogo');
-    const data = await res.json();
-    const items = data.items || [];
+    // 2. Busca na rede com tolerância a falhas
+    try {
+      const res = await fetch(`/api/catalog?category=${category}&page=${page}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const items = data.items || [];
 
-    // Salva no IndexedDB
-    idbService.setCachedCatalog(category, page, items);
-    return items;
+      // Salva no IndexedDB
+      if (items.length > 0) {
+        idbService.setCachedCatalog(category, page, items);
+      }
+      return items;
+    } catch (err) {
+      console.warn(`[API] Erro ao carregar catálogo ${category}:`, err);
+      return [];
+    }
   },
 
   async search(query: string): Promise<MediaItem[]> {
@@ -103,21 +110,31 @@ export const api = {
       }
     } catch {}
 
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-    if (!res.ok) throw new Error('Falha na busca');
-    const data = await res.json();
-    const results = data.results || [];
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const results = data.results || [];
 
-    idbService.setCachedSearch(query, results);
-    return results;
+      if (results.length > 0) {
+        idbService.setCachedSearch(query, results);
+      }
+      return results;
+    } catch {
+      return [];
+    }
   },
 
   async getSuggestions(query: string): Promise<any[]> {
     if (!query.trim()) return [];
-    const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(query)}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.suggestions || [];
+    try {
+      const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(query)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.suggestions || [];
+    } catch {
+      return [];
+    }
   },
 
   async getDetails(id: number, type: 'movie' | 'tv' | 'anime' = 'movie'): Promise<MediaItem> {
@@ -136,6 +153,33 @@ export const api = {
       idbService.setCachedDetails(id, type, details);
     }
     return details;
+  },
+
+  // Carregamento sob demanda (lazy-loading) de temporadas e episódios
+  async getSeason(seriesId: number, seasonNumber: number): Promise<Episode[]> {
+    // 1. Tenta IndexedDB
+    try {
+      const cached = await idbService.getCachedSeason(seriesId, seasonNumber);
+      if (cached && cached.length > 0) {
+        return cached;
+      }
+    } catch {}
+
+    // 2. Busca na rede
+    try {
+      const res = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
+      if (!res.ok) throw new Error('Falha ao carregar temporada');
+      const data = await res.json();
+      const episodes: Episode[] = data.episodes || [];
+
+      if (episodes.length > 0) {
+        idbService.setCachedSeason(seriesId, seasonNumber, episodes);
+      }
+      return episodes;
+    } catch (err) {
+      console.warn(`[API] Erro ao carregar episódios da temporada ${seasonNumber}:`, err);
+      return [];
+    }
   },
 
   async getTorrents(

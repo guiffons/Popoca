@@ -1,0 +1,54 @@
+[
+  {
+    "userId": "guilhermefonseca732@gmail.com",
+    "email": "guilhermefonseca732@gmail.com",
+    "lastUpdated": 1793480703458,
+    "watchHistory": [
+      {
+        "id": 693134,
+        "title": "Duna: Parte 2",
+        "currentTime": 120,
+        "duration": 9960,
+        "progressPercent": 2,
+        "lastWatched": 1793480703342
+      }
+    ],
+    "ratings": {
+      "693134": {
+        "mediaId": 693134,
+        "title": "Duna: Parte 2",
+        "rating": 5,
+        "watchedDate": 1793480703342
+      }
+    },
+    "watched": [],
+    "watchlist": [],
+    "liked": [],
+    "customLists": [],
+    "profile": {
+      "username": "Cinéfilo Popoca",
+      "handle": "@cinfilo",
+      "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+      "bio": "Amante de cinema, animes e maratonas em streaming ultra-leve.",
+      "joinedAt": 1793480660840
+    }
+  },
+  {
+    "userId": "pair-code",
+    "email": "pair-code@popoca.app",
+    "lastUpdated": 1793480693686,
+    "watchHistory": [],
+    "ratings": {},
+    "watched": [],
+    "watchlist": [],
+    "liked": [],
+    "customLists": [],
+    "profile": {
+      "username": "Cinéfilo Popoca",
+      "handle": "@cinfilo",
+      "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+      "bio": "Amante de cinema, animes e maratonas em streaming ultra-leve.",
+      "joinedAt": 1793480660859
+    }
+  }
+]

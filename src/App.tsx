@@ -18,6 +18,7 @@ import { LibrarySearchView } from './components/LibrarySearchView.tsx';
 import { MediaItem, TorrentSource, WatchHistoryItem, Episode } from './types/index.ts';
 import { api } from './services/api.ts';
 import { storageService } from './services/storage.ts';
+import { idbService } from './services/db.ts';
 import { RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -59,12 +60,35 @@ export default function App() {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Carrega catálogos e histórico
+  // Carrega catálogos e histórico de forma instantânea com IndexedDB (Offline-First)
   useEffect(() => {
     async function loadData() {
-      setIsLoading(true);
+      // 1. Hidratação Instantânea via IndexedDB (< 20ms)
       try {
-        const [trending, latest, movies, tv, anime] = await Promise.all([
+        const [cTrending, cLatest, cMovies, cTv, cAnime] = await Promise.all([
+          idbService.getCachedCatalog('trending', 1),
+          idbService.getCachedCatalog('latest', 1),
+          idbService.getCachedCatalog('movies', 1),
+          idbService.getCachedCatalog('tv', 1),
+          idbService.getCachedCatalog('anime', 1)
+        ]);
+
+        if (cTrending && cTrending.length > 0) {
+          setTrendingList(cTrending);
+          setHeroItem(cTrending[0]);
+          setIsLoading(false);
+        }
+        if (cLatest && cLatest.length > 0) setLatestList(cLatest);
+        if (cMovies && cMovies.length > 0) setMoviesList(cMovies);
+        if (cTv && cTv.length > 0) setTvList(cTv);
+        if (cAnime && cAnime.length > 0) setAnimeList(cAnime);
+      } catch {
+        // Sem cache no primeiro acesso
+      }
+
+      // 2. Busca na rede com Promise.allSettled para tolerância total a falhas
+      try {
+        const [trendingRes, latestRes, moviesRes, tvRes, animeRes] = await Promise.allSettled([
           api.getCatalog('trending'),
           api.getCatalog('latest'),
           api.getCatalog('movies'),
@@ -72,17 +96,26 @@ export default function App() {
           api.getCatalog('anime')
         ]);
 
-        setTrendingList(trending);
-        setLatestList(latest.length > 0 ? latest : trending.slice(3, 10));
-        setMoviesList(movies);
-        setTvList(tv);
-        setAnimeList(anime);
+        const trending = trendingRes.status === 'fulfilled' && trendingRes.value.length > 0 ? trendingRes.value : [];
+        const latest = latestRes.status === 'fulfilled' && latestRes.value.length > 0 ? latestRes.value : [];
+        const movies = moviesRes.status === 'fulfilled' && moviesRes.value.length > 0 ? moviesRes.value : [];
+        const tv = tvRes.status === 'fulfilled' && tvRes.value.length > 0 ? tvRes.value : [];
+        const anime = animeRes.status === 'fulfilled' && animeRes.value.length > 0 ? animeRes.value : [];
 
         if (trending.length > 0) {
-          setHeroItem(trending[0]);
+          setTrendingList(trending);
+          setHeroItem(prev => prev || trending[0]);
         }
+        if (latest.length > 0) {
+          setLatestList(latest);
+        } else if (trending.length > 3) {
+          setLatestList(trending.slice(3, 10));
+        }
+        if (movies.length > 0) setMoviesList(movies);
+        if (tv.length > 0) setTvList(tv);
+        if (anime.length > 0) setAnimeList(anime);
       } catch (err) {
-        console.error('Erro ao carregar catálogo:', err);
+        console.error('Erro ao atualizar catálogo da rede:', err);
       } finally {
         setIsLoading(false);
       }
@@ -90,6 +123,14 @@ export default function App() {
 
     loadData();
     refreshWatchHistory();
+
+    const handleSynced = () => {
+      refreshWatchHistory();
+    };
+    window.addEventListener('popoca_storage_synced', handleSynced);
+    return () => {
+      window.removeEventListener('popoca_storage_synced', handleSynced);
+    };
   }, []);
 
   const refreshWatchHistory = () => {
@@ -133,7 +174,7 @@ export default function App() {
             overview: '',
             durationMinutes: 45,
             stillPath: media.backdrop_path,
-            streamUrl: media.stream_url || 'https://vjs.zencdn.net/v/oceans.mp4'
+            streamUrl: media.stream_url || `/api/stream/${media.id}?season=${historyItem.seasonNumber || 1}&episode=${historyItem.episodeNumber || 1}`
           };
         }
       } catch {
@@ -145,7 +186,7 @@ export default function App() {
           overview: '',
           durationMinutes: 45,
           stillPath: media.backdrop_path,
-          streamUrl: media.stream_url || 'https://vjs.zencdn.net/v/oceans.mp4'
+          streamUrl: media.stream_url || `/api/stream/${media.id}?season=${historyItem.seasonNumber || 1}&episode=${historyItem.episodeNumber || 1}`
         };
       }
     }
@@ -183,7 +224,7 @@ export default function App() {
         sizeFormatted: '2.40 GB',
         isPortugueseAudio: true,
         source: 'Rede Popoca P2P Brasil',
-        directUrl: episode?.streamUrl || media.stream_url || 'https://vjs.zencdn.net/v/oceans.mp4'
+        directUrl: episode?.streamUrl || media.stream_url || `/api/stream/${media.id}`
       };
 
       setActivePlayerState({

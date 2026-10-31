@@ -128,19 +128,15 @@ export class TranscoderQueueManager {
         .audioChannels(2)
         .format('adts');
     } else {
-      // Pipeline de Vídeo Otimizado com flags estritas de performance
+      // Remuxing ultra-rápido com cópia direta do fluxo de vídeo (-c:v copy) para eliminar gargalo de CPU e travamentos
       command
-        .videoCodec('libx264')
+        .videoCodec('copy')
         .outputOptions([
-          '-preset ultrafast',
-          '-tune zerolatency',
-          '-threads 2',
-          '-sn', // Ignora legendas embutidas que corrompem streaming por pipe
-          '-pix_fmt yuv420p',
+          '-sn', // Ignora legendas embutidas para evitar corrupção de streaming
           '-movflags frag_keyframe+empty_moov+default_base_moof'
         ])
         .audioCodec('aac')
-        .audioBitrate('160k')
+        .audioBitrate('192k')
         .audioChannels(2)
         .format('mp4');
     }

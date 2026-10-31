@@ -15,6 +15,12 @@ const CUSTOM_LISTS_KEY = 'popoca_custom_lists_v1';
 const PROFILE_KEY = 'popoca_user_profile_v1';
 const THEME_KEY = 'popoca_theme_mode_v1';
 
+function notifyStorageChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('popoca_storage_changed'));
+  }
+}
+
 export const storageService = {
   // --- TEMA ---
   getTheme(): 'dark' | 'light' {
@@ -99,6 +105,7 @@ export const storageService = {
       }
 
       localStorage.setItem(WATCH_HISTORY_KEY, JSON.stringify(updatedHistory.slice(0, 25)));
+      notifyStorageChange();
     } catch (e) {
       console.warn('Erro ao salvar progresso:', e);
     }
@@ -108,6 +115,7 @@ export const storageService = {
     try {
       const history = this.getWatchHistory().filter(h => h.id !== id);
       localStorage.setItem(WATCH_HISTORY_KEY, JSON.stringify(history));
+      notifyStorageChange();
     } catch (e) {
       console.warn('Erro ao remover do histórico:', e);
     }
@@ -134,6 +142,7 @@ export const storageService = {
     const current = this.getProfile();
     const updated = { ...current, ...profile };
     localStorage.setItem(PROFILE_KEY, JSON.stringify(updated));
+    notifyStorageChange();
     return updated;
   },
 
@@ -335,12 +344,14 @@ export const storageService = {
     };
     lists.unshift(newList);
     localStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(lists));
+    notifyStorageChange();
     return newList;
   },
 
   deleteCustomList(listId: string) {
     const lists = this.getCustomLists().filter(l => l.id !== listId);
     localStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(lists));
+    notifyStorageChange();
   },
 
   addMovieToList(listId: string, media: MediaItem): boolean {
@@ -350,6 +361,7 @@ export const storageService = {
     if (!target.items.some(m => m.id === media.id)) {
       target.items.unshift(media);
       localStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(lists));
+      notifyStorageChange();
       return true;
     }
     return false;
@@ -361,6 +373,7 @@ export const storageService = {
     if (target) {
       target.items = target.items.filter(m => m.id !== mediaId);
       localStorage.setItem(CUSTOM_LISTS_KEY, JSON.stringify(lists));
+      notifyStorageChange();
     }
   },
 

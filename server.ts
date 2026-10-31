@@ -15,6 +15,7 @@ import { tmdbService } from './server/tmdbService.ts';
 import { indexerService } from './server/indexerService.ts';
 import { torrentEngine } from './server/torrentEngine.ts';
 import { subtitleService } from './server/subtitleService.ts';
+import { syncService } from './server/syncService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,6 +73,18 @@ async function bootstrap() {
         return;
       }
       res.json({ success: true, details });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3.1 Carregamento sob demanda (lazy-loading) de episódios por temporada
+  app.get('/api/series/:id/season/:seasonNumber', async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const seasonNumber = parseInt(req.params.seasonNumber, 10) || 1;
+      const episodes = await tmdbService.getSeasonEpisodes(id, seasonNumber);
+      res.json({ success: true, seriesId: id, seasonNumber, episodes });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -140,13 +153,22 @@ async function bootstrap() {
         }
       }
 
-      // 3. Fallback sob demanda com HTTP 206 Partial Content sem travamento
-      const directUrl = (episode && media.seasons ? media.seasons.flatMap(s => s.episodes).find(e => e.episodeNumber === episode)?.streamUrl : undefined) || media.stream_url || 'https://vjs.zencdn.net/v/oceans.mp4';
-      proxyVideoRange(req, res, directUrl);
+      // 3. Fallback somente se houver URL direta válida (não placeholder)
+      const directUrl = (episode && media.seasons ? media.seasons.flatMap(s => s.episodes).find(e => e.episodeNumber === episode)?.streamUrl : undefined) || media.stream_url;
+      if (directUrl && !directUrl.includes('oceans.mp4') && !directUrl.includes('flower.mp4') && !directUrl.includes('sintel')) {
+        proxyVideoRange(req, res, directUrl);
+        return;
+      }
+
+      res.status(503).json({
+        success: false,
+        error: 'TORRENT_STREAM_UNAVAILABLE',
+        message: 'A fonte P2P selecionada não possui sementes ativas no momento. Por favor selecione outra opção na lista de torrents (ex: 1080p WEB-DL Dublado PT-BR).'
+      });
     } catch (err: any) {
       console.error('[API /stream/:tmdbId] Erro fatal:', err);
       if (!res.headersSent) {
-        res.status(500).send(`Erro no streaming TMDB: ${err.message}`);
+        res.status(500).json({ success: false, error: err.message });
       }
     }
   });
@@ -165,9 +187,13 @@ async function bootstrap() {
     try {
       await torrentEngine.handleStreamRequest(req, res, magnet, transcode, audioOnly);
     } catch (err: any) {
-      console.warn(`[Stream API] Falha no engine torrent P2P (${err.message}), chaveando para stream HTTP 206:`);
+      console.warn(`[Stream API] Falha no engine torrent P2P: ${err.message}`);
       if (!res.headersSent) {
-        proxyVideoRange(req, res, 'https://vjs.zencdn.net/v/oceans.mp4');
+        res.status(503).json({
+          success: false,
+          error: 'TORRENT_STREAM_UNAVAILABLE',
+          message: 'Não foi possível estabelecer conexão com o enxame deste torrent. Tente outra fonte com mais seeds ou formato alternativo.'
+        });
       }
     }
   });
@@ -215,6 +241,67 @@ async function bootstrap() {
       res.send(Buffer.from(arrayBuffer));
     } catch {
       res.status(502).end();
+    }
+  });
+
+  // 8.1 Geração de Código de Pareamento entre Dispositivos
+  app.post('/api/sync/pair-code', (req: Request, res: Response) => {
+    try {
+      const { userId } = req.body;
+      if (!userId) {
+        res.status(400).json({ success: false, error: 'userId obrigatório' });
+        return;
+      }
+      const code = syncService.generatePairCode(userId);
+      res.json({ success: true, code, expiresInMinutes: 15 });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8.2 Resgate de Código de Pareamento para vincular outro dispositivo
+  app.post('/api/sync/pair-code/redeem', (req: Request, res: Response) => {
+    try {
+      const { code } = req.body;
+      if (!code) {
+        res.status(400).json({ success: false, error: 'Código de pareamento obrigatório' });
+        return;
+      }
+      const user = syncService.redeemPairCode(code);
+      if (!user) {
+        res.status(404).json({ success: false, error: 'Código de pareamento inválido ou expirado.' });
+        return;
+      }
+      res.json({ success: true, data: user });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8.3 Sincronização em Nuvem Cross-Device (Histórico, Avaliações, Watchlist, Listas)
+  app.get('/api/sync/:userId', (req: Request, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      const user = syncService.getUser(userId);
+      if (!user) {
+        res.json({ success: true, exists: false, data: null });
+        return;
+      }
+      res.json({ success: true, exists: true, data: user });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sync/:userId', (req: Request, res: Response) => {
+    try {
+      const userId = req.params.userId;
+      const { email, clientData } = req.body;
+      const merged = syncService.syncUserData(userId, email, clientData || {});
+      res.json({ success: true, data: merged });
+    } catch (err: any) {
+      console.error('[API /sync/:userId] Erro:', err);
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
