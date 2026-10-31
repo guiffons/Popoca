@@ -141,15 +141,16 @@ async function bootstrap() {
         episode
       });
 
-      const bestTorrent = torrents.find(t => t.magnetUri && t.seeds > 0) || torrents[0];
+      // 2. Consulta agregadores (Torrentio, YTS, Cinemeta) e tenta os melhores torrents em cascata (waterfall)
+      const topCandidates = torrents.filter(t => t.magnetUri).slice(0, 4);
 
-      if (bestTorrent && bestTorrent.magnetUri) {
-        console.log(`[TMDB Stream] Mapeando ID ${tmdbId} (${media.title}) para torrent ${bestTorrent.quality} (${bestTorrent.seeds} seeds, ${bestTorrent.sizeFormatted})`);
+      for (const candidate of topCandidates) {
+        console.log(`[TMDB Stream] Tentando streaming para ID ${tmdbId} via torrent ${candidate.quality} (${candidate.seeds} seeds): ${candidate.title}`);
         try {
-          await torrentEngine.handleStreamRequest(req, res, bestTorrent.magnetUri, transcode, audioOnly);
+          await torrentEngine.handleStreamRequest(req, res, candidate.magnetUri, transcode, audioOnly);
           return;
         } catch (torrentErr) {
-          console.warn(`[TMDB Stream] Falha no torrent P2P, chaveando para stream direto resiliente:`, torrentErr);
+          console.warn(`[TMDB Stream] Instabilidade na fonte ${candidate.quality}, tentando próxima alternativa...`);
         }
       }
 
@@ -173,9 +174,10 @@ async function bootstrap() {
     }
   });
 
-  // 5.1 Streaming HTTP 206 direto por Magnet Link
+  // 5.1 Streaming HTTP 206 direto por Magnet Link com fallback automático
   app.get('/api/stream', async (req: Request, res: Response) => {
     const magnet = req.query.magnet as string;
+    const altMagnetsRaw = req.query.altMagnets as string | undefined;
     const transcode = req.query.transcode === 'true';
     const audioOnly = req.query.audioOnly === 'true';
 
@@ -184,17 +186,31 @@ async function bootstrap() {
       return;
     }
 
-    try {
-      await torrentEngine.handleStreamRequest(req, res, magnet, transcode, audioOnly);
-    } catch (err: any) {
-      console.warn(`[Stream API] Falha no engine torrent P2P: ${err.message}`);
-      if (!res.headersSent) {
-        res.status(503).json({
-          success: false,
-          error: 'TORRENT_STREAM_UNAVAILABLE',
-          message: 'Não foi possível estabelecer conexão com o enxame deste torrent. Tente outra fonte com mais seeds ou formato alternativo.'
-        });
+    const magnetsToTry = [magnet];
+    if (altMagnetsRaw) {
+      try {
+        const alts = JSON.parse(altMagnetsRaw);
+        if (Array.isArray(alts)) {
+          alts.forEach(m => { if (typeof m === 'string' && m && !magnetsToTry.includes(m)) magnetsToTry.push(m); });
+        }
+      } catch {}
+    }
+
+    for (const currentMagnet of magnetsToTry) {
+      try {
+        await torrentEngine.handleStreamRequest(req, res, currentMagnet, transcode, audioOnly);
+        return;
+      } catch (err: any) {
+        console.warn(`[Stream API] Falha na fonte P2P, tentando próxima alternativa se houver: ${err.message}`);
       }
+    }
+
+    if (!res.headersSent) {
+      res.status(503).json({
+        success: false,
+        error: 'TORRENT_STREAM_UNAVAILABLE',
+        message: 'Não foi possível estabelecer conexão com o enxame deste torrent. Tente outra fonte com mais seeds ou formato alternativo.'
+      });
     }
   });
 
@@ -208,6 +224,33 @@ async function bootstrap() {
 
     const stats = torrentEngine.getStats(magnet);
     res.json({ success: true, stats });
+  });
+
+  // 6.1 Pré-aquecimento silencioso de chunks de torrent em segundo plano
+  app.get('/api/torrent/preload', async (req: Request, res: Response) => {
+    const magnet = req.query.magnet as string;
+    if (!magnet) {
+      res.status(400).json({ error: 'Magnet URI ausente' });
+      return;
+    }
+    torrentEngine.preload(magnet).catch(() => {});
+    res.json({ success: true, status: 'preloading_initiated' });
+  });
+
+  // 6.2 Sistema de Prefetch Inteligente (antecipa próximos 3 chunks do torrent)
+  app.get('/api/torrent/prefetch', (req: Request, res: Response) => {
+    const magnet = req.query.magnet as string;
+    const currentTime = parseFloat(req.query.currentTime as string) || 0;
+    const duration = parseFloat(req.query.duration as string) || 7200;
+    const speed = parseFloat(req.query.speed as string) || 1024 * 1024 * 2;
+
+    if (!magnet) {
+      res.status(400).json({ error: 'Magnet URI ausente' });
+      return;
+    }
+
+    const result = torrentEngine.prefetchNextPieces(magnet, currentTime, duration, speed);
+    res.json(result);
   });
 
   // 7. Legendas WebVTT (.vtt) sincronizadas

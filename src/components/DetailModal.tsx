@@ -32,7 +32,13 @@ import { LazyImage } from './LazyImage.tsx';
 interface DetailModalProps {
   media: MediaItem | null;
   onClose: () => void;
-  onStartPlayback: (media: MediaItem, torrent: TorrentSource, forceTranscode?: boolean, episode?: Episode) => void;
+  onStartPlayback: (
+    media: MediaItem,
+    torrent: TorrentSource,
+    forceTranscode?: boolean,
+    episode?: Episode,
+    availableTorrents?: TorrentSource[]
+  ) => void;
 }
 
 export const DetailModal: React.FC<DetailModalProps> = ({
@@ -139,6 +145,12 @@ export const DetailModal: React.FC<DetailModalProps> = ({
         });
         if (isMounted) {
           setTorrents(results);
+          if (results.length > 0) {
+            const best = results.find((t) => t.isPortugueseAudio && t.seeds > 0) || results[0];
+            if (best?.magnetUri) {
+              api.preloadTorrent(best.magnetUri);
+            }
+          }
         }
       } catch (err) {
         console.warn('Erro ao carregar fontes:', err);
@@ -293,12 +305,12 @@ export const DetailModal: React.FC<DetailModalProps> = ({
       source: 'Rede P2P Popoca Brasil',
       directUrl: episode.streamUrl
     };
-    onStartPlayback(media, defaultTorrent, forceTranscode, episode);
+    onStartPlayback(media, defaultTorrent, forceTranscode, episode, torrents);
   };
 
   // Iniciar reprodução selecionando um torrent específico
   const handlePlaySelectedTorrent = (torrent: TorrentSource) => {
-    onStartPlayback(media, torrent, forceTranscode, isSeriesOrAnime ? currentEpisode : undefined);
+    onStartPlayback(media, torrent, forceTranscode, isSeriesOrAnime ? currentEpisode : undefined, torrents);
   };
 
   return (
@@ -322,8 +334,8 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           <X className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
 
-        {/* Backdrop Header com LazyImage */}
-        <div className="relative h-48 sm:h-72 w-full overflow-hidden shrink-0">
+        {/* Banner Cinematográfico Limpo - Sem imagens gigantes sobrepostas e sem textos por cima */}
+        <div className="relative h-48 sm:h-64 md:h-72 w-full overflow-hidden shrink-0 rounded-t-2xl sm:rounded-t-3xl">
           <LazyImage
             src={media.backdrop_path}
             alt={media.title}
@@ -331,55 +343,42 @@ export const DetailModal: React.FC<DetailModalProps> = ({
             aspectRatio="auto"
             className="w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-white/90 via-transparent to-transparent dark:from-[#0e1117] dark:via-[#0e1117]/70 dark:to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-white/95 via-transparent to-black/30 dark:from-[#0e1117] dark:via-[#0e1117]/40 dark:to-transparent" />
         </div>
 
-        {/* Corpo do Conteúdo */}
-        <div className="relative px-4 pb-6 pt-2 sm:px-8 sm:pb-8 sm:-mt-16 z-10 flex flex-col md:flex-row gap-5 sm:gap-6 box-border">
-          {/* Poster Desktop com LazyImage */}
-          <div className="w-32 sm:w-44 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/60 dark:border-white/10 hidden sm:block bg-slate-200 dark:bg-neutral-900 aspect-[2/3]">
-            <LazyImage
-              src={media.poster_path}
-              alt={media.title}
-              title={media.title}
-              aspectRatio="poster"
-              className="w-full h-full object-cover"
-            />
-          </div>
-
-          {/* Dados & Ações */}
-          <div className="flex-1 min-w-0 space-y-4">
-            <div>
-              <div className="flex items-center gap-2 flex-wrap text-xs text-slate-600 dark:text-white/60 mb-1">
-                {year && <span className="font-mono">{year}</span>}
-                {media.runtime && <span>· {media.runtime} min</span>}
-                {isSeriesOrAnime && (
-                  <span className="px-2 py-0.5 rounded-md bg-slate-200/80 dark:bg-white/10 text-slate-800 dark:text-white font-semibold">
-                    {seasonsState.length || 1} {seasonsState.length > 1 ? 'Temporadas' : 'Temporada'}
-                  </span>
-                )}
-                {media.vote_average > 0 && (
-                  <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400 font-mono font-bold">
-                    <Star className="w-3.5 h-3.5 fill-current" />
-                    {media.vote_average.toFixed(1)}
-                  </span>
-                )}
-              </div>
-
-              <h1 className="text-xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight break-words">
-                {media.title}
-              </h1>
-
-              {media.original_title && media.original_title !== media.title && (
-                <p className="text-xs text-slate-500 dark:text-white/40 italic mt-0.5 break-words">
-                  Título original: {media.original_title}
-                </p>
+        {/* Corpo do Conteúdo - Totalmente Centralizado e Sem Textos Por Cima da Imagem */}
+        <div className="relative px-4 sm:px-8 pb-8 pt-4 z-10 flex flex-col items-center text-center max-w-3xl mx-auto space-y-6 box-border w-full">
+          {/* Dados & Título Centralizados */}
+          <div className="space-y-3 w-full flex flex-col items-center">
+            <div className="flex items-center justify-center gap-2 flex-wrap text-xs text-slate-600 dark:text-white/60">
+              {year && <span className="font-mono">{year}</span>}
+              {media.runtime && <span>· {media.runtime} min</span>}
+              {isSeriesOrAnime && (
+                <span className="px-2 py-0.5 rounded-md bg-slate-200/80 dark:bg-white/10 text-slate-800 dark:text-white font-semibold">
+                  {seasonsState.length || 1} {seasonsState.length > 1 ? 'Temporadas' : 'Temporada'}
+                </span>
+              )}
+              {media.vote_average > 0 && (
+                <span className="flex items-center gap-1 text-amber-500 dark:text-amber-400 font-mono font-bold">
+                  <Star className="w-3.5 h-3.5 fill-current" />
+                  {media.vote_average.toFixed(1)}
+                </span>
               )}
             </div>
 
-            {/* Gêneros */}
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight break-words text-center">
+              {media.title}
+            </h1>
+
+            {media.original_title && media.original_title !== media.title && (
+              <p className="text-xs text-slate-500 dark:text-white/40 italic mt-0.5 break-words text-center">
+                Título original: {media.original_title}
+              </p>
+            )}
+
+            {/* Gêneros Centralizados */}
             {media.genres && media.genres.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center justify-center gap-1.5 flex-wrap pt-0.5">
                 {media.genres.map((g) => (
                   <span
                     key={g.id}
@@ -391,10 +390,35 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               </div>
             )}
 
-            {/* Sinopse */}
-            <p className="text-xs sm:text-sm text-slate-700 dark:text-white/70 leading-relaxed break-words">
+            {/* Sinopse Centralizada */}
+            <p className="text-xs sm:text-sm text-slate-700 dark:text-white/80 leading-relaxed break-words text-center max-w-2xl pt-1">
               {media.overview || 'Sinopse oficial em sincronização com o catálogo.'}
             </p>
+
+            {/* Botão de Destaque Assistir Agora */}
+            <div className="pt-2 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const bestPtBr = torrents.find((t) => t.isPortugueseAudio && t.seeds > 0) || torrents[0];
+                  if (bestPtBr) {
+                    handlePlaySelectedTorrent(bestPtBr);
+                  } else if (isSeriesOrAnime && currentEpisode) {
+                    handlePlayEpisode(currentEpisode);
+                  }
+                }}
+                disabled={isLoadingTorrents && torrents.length === 0}
+                className="px-6 py-3 bg-white hover:bg-slate-200 text-black font-extrabold text-sm rounded-2xl shadow-xl flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>
+                  {torrents.some((t) => t.isPortugueseAudio)
+                    ? 'Assistir Agora (Dublado PT-BR)'
+                    : 'Assistir Agora'}
+                </span>
+              </button>
+            </div>
+          </div>
 
             {/* Seção Letterboxd (Avaliação, Favoritos, Watchlist, Listas) */}
             <div className="p-3.5 sm:p-4 rounded-2xl glass-subtle border border-slate-200/80 dark:border-white/[0.06] space-y-3">
@@ -861,7 +885,6 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   </button>
                 </div>
               )}
-            </div>
           </div>
         </div>
       </div>

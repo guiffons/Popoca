@@ -41,6 +41,7 @@ export default function App() {
   const [activePlayerState, setActivePlayerState] = useState<{
     media: MediaItem;
     torrent: TorrentSource;
+    availableTorrents?: TorrentSource[];
     episode?: Episode;
     initialTime?: number;
     forceTranscode?: boolean;
@@ -230,6 +231,7 @@ export default function App() {
       setActivePlayerState({
         media,
         torrent,
+        availableTorrents: sources,
         episode,
         initialTime: typeof resumeTime === 'number' ? resumeTime : (historyMatch ? historyMatch.currentTime : 0)
       });
@@ -239,12 +241,19 @@ export default function App() {
   };
 
   // Reprodução a partir do Modal de Detalhes
-  const handleStartFromDetail = (media: MediaItem, torrent: TorrentSource, forceTranscode?: boolean, episode?: Episode) => {
+  const handleStartFromDetail = (
+    media: MediaItem,
+    torrent: TorrentSource,
+    forceTranscode?: boolean,
+    episode?: Episode,
+    availableTorrents?: TorrentSource[]
+  ) => {
     const historyMatch = watchHistory.find(h => h.id === media.id);
     setSelectedMedia(null);
     setActivePlayerState({
       media,
       torrent,
+      availableTorrents: availableTorrents && availableTorrents.length > 0 ? availableTorrents : [torrent],
       episode,
       initialTime: historyMatch ? historyMatch.currentTime : 0,
       forceTranscode
@@ -530,6 +539,7 @@ export default function App() {
         <VideoPlayer
           media={activePlayerState.media}
           torrent={activePlayerState.torrent}
+          availableTorrents={activePlayerState.availableTorrents}
           episode={activePlayerState.episode}
           initialTime={activePlayerState.initialTime}
           forceTranscode={activePlayerState.forceTranscode}

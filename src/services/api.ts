@@ -242,12 +242,18 @@ export const api = {
     return data.stats;
   },
 
-  getStreamUrl(magnetUri: string, options: { transcode?: boolean; audioOnly?: boolean } = {}): string {
+  getStreamUrl(
+    magnetUri: string,
+    options: { transcode?: boolean; audioOnly?: boolean; altMagnets?: string[] } = {}
+  ): string {
     const params = new URLSearchParams({
       magnet: magnetUri
     });
     if (options.transcode) params.set('transcode', 'true');
     if (options.audioOnly) params.set('audioOnly', 'true');
+    if (options.altMagnets && options.altMagnets.length > 0) {
+      params.set('altMagnets', JSON.stringify(options.altMagnets.slice(0, 3)));
+    }
     return `/api/stream?${params.toString()}`;
   },
 
@@ -277,5 +283,32 @@ export const api = {
 
   getSubtitleUrl(title: string, lang: string = 'pt-BR'): string {
     return `/api/subtitles?title=${encodeURIComponent(title)}&lang=${encodeURIComponent(lang)}`;
+  },
+
+  preloadTorrent(magnetUri: string): void {
+    if (!magnetUri) return;
+    fetch(`/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}`).catch(() => {});
+  },
+
+  async prefetchNextChunks(
+    magnetUri: string,
+    currentTime: number,
+    duration: number,
+    speed?: number
+  ): Promise<any> {
+    if (!magnetUri) return null;
+    try {
+      const params = new URLSearchParams({
+        magnet: magnetUri,
+        currentTime: currentTime.toString(),
+        duration: duration.toString()
+      });
+      if (typeof speed === 'number') params.set('speed', speed.toString());
+      const res = await fetch(`/api/torrent/prefetch?${params.toString()}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 };
