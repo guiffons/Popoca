@@ -1,0 +1,6 @@
+{
+  "name": "Popoca Streaming",
+  "description": "Plataforma de streaming web ultra-leve para filmes, séries e animes diretamente via torrent com suporte a HTTP 206, transcode em tempo real e experiência Apple TV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,6 @@
+{
+  "summary":  "Plano atualizado com os filtros de Idioma (Dublado PT-BR) e Formato (WEB-DL vs Bluray) no DetailModal, persistência offline-first com IndexedDB (popoca_tmdb_db), resolução do carregamento de capas no LazyImage e streaming dos torrents reais sem interceptação por vídeos padrão.",
+  "updatedAt":  "2026-10-31T00:32:15.489199399Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
