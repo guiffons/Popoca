@@ -74,8 +74,8 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
     currentMedia.media_type === 'tv'
       ? 'Série'
       : currentMedia.media_type === 'anime'
-      ? 'Anime'
-      : 'Filme';
+        ? 'Anime'
+        : 'Filme';
   const primaryGenre = currentMedia.genres?.[0]?.name;
   const isEpisodic =
     currentMedia.media_type === 'tv' ||
@@ -252,11 +252,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                   <button
                     type="button"
                     onClick={handleToggleLike}
-                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${
-                      isLiked
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${isLiked
                         ? 'bg-white text-black border-white'
                         : 'bg-white/12 border-white/16 text-white/80 hover:text-white hover:bg-white/20'
-                    }`}
+                      }`}
                     title={isLiked ? 'Curtido' : 'Curtir'}
                     aria-label="Curtir"
                   >
@@ -266,11 +265,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                   <button
                     type="button"
                     onClick={handleToggleWatchlist}
-                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${
-                      inWatchlist
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${inWatchlist
                         ? 'bg-white text-black border-white'
                         : 'bg-white/12 border-white/16 text-white/80 hover:text-white hover:bg-white/20'
-                    }`}
+                      }`}
                     title={inWatchlist ? 'Na Watchlist' : 'Adicionar à Watchlist'}
                     aria-label="Watchlist"
                   >
@@ -292,11 +290,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
                       onClick={() => setCurrentIndex(idx)}
                       title={s.title}
                       aria-label={`Ir para ${s.title}`}
-                      className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
-                        isActive
+                      className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${isActive
                           ? 'w-7 bg-white shadow-sm'
                           : 'w-1.5 bg-white/35 hover:bg-white/65'
-                      }`}
+                        }`}
                     />
                   );
                 })}

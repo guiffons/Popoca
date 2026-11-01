@@ -303,7 +303,10 @@ async function bootstrap() {
             {
               seekSeconds,
               preferPortugueseAudio,
-              audioTrackIndex
+              audioTrackIndex,
+              season,
+              episode,
+              fileIdx: candidate.fileIdx
             }
           );
           return;
@@ -357,6 +360,9 @@ async function bootstrap() {
       req.query.audioTrack !== undefined
         ? parseInt(req.query.audioTrack as string, 10)
         : undefined;
+    const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+    const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+    const fileIdx = req.query.fileIdx ? parseInt(req.query.fileIdx as string, 10) : undefined;
 
     if (!magnet) {
       res.status(400).send('Magnet URI ausente.');
@@ -398,7 +404,10 @@ async function bootstrap() {
           {
             seekSeconds,
             preferPortugueseAudio,
-            audioTrackIndex
+            audioTrackIndex,
+            season,
+            episode,
+            fileIdx
           }
         );
         return;

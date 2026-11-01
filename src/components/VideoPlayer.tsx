@@ -379,7 +379,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             streamKey: targetStreamKey,
             seekSeconds: opts.seekSeconds,
             preferPortugueseAudio: targetTorrent.isPortugueseAudio,
-            audioTrackIndex: opts.audioTrackIndex
+            audioTrackIndex: opts.audioTrackIndex,
+            season: episode?.seasonNumber,
+            episode: episode?.episodeNumber,
+            fileIdx: targetTorrent.fileIdx
           }) + (opts.isRetry ? `&_retry=${Date.now()}` : '')
         );
       }
@@ -1468,11 +1471,60 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
+      {/* Controles Grandes Centrais Touch para Celular / Tablet */}
+      {!isMini && showControls && (
+        <div className="sm:hidden absolute inset-0 z-30 flex items-center justify-center gap-7 pointer-events-none animate-in fade-in duration-200">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              skipSeconds(-10);
+            }}
+            className="w-12 h-12 rounded-full bg-black/65 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center shadow-2xl pointer-events-auto active:scale-90 transition-transform cursor-pointer"
+            aria-label="Voltar 10 segundos"
+          >
+            <RotateCcw className="w-5 h-5 text-white/90" />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.35)] pointer-events-auto active:scale-90 transition-transform cursor-pointer"
+            aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
+          >
+            {isPlaying ? (
+              <Pause className="w-7 h-7 fill-current" />
+            ) : (
+              <Play className="w-7 h-7 fill-current ml-1" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              skipSeconds(10);
+            }}
+            className="w-12 h-12 rounded-full bg-black/65 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center shadow-2xl pointer-events-auto active:scale-90 transition-transform cursor-pointer"
+            aria-label="Avançar 10 segundos"
+          >
+            <RotateCw className="w-5 h-5 text-white/90" />
+          </button>
+        </div>
+      )}
+
       {/* Vídeo HTML5 Principal */}
       <video
         ref={videoRef}
         src={activeVideoSrc}
         playsInline
+        // @ts-ignore
+        webkit-playsinline="true"
+        // @ts-ignore
+        x-webkit-airplay="allow"
         autoPlay
         className={`w-full object-contain ${isMini ? 'aspect-video bg-black' : 'h-full'} ${isAudioOnly && !isMini ? 'hidden' : 'block'
           }`}
@@ -2150,16 +2202,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           </div>
 
+          {/* CONTROLES CENTRAIS EM DESTAQUE (Ideal para Celular e Toque) */}
+          <div
+            className={`absolute inset-0 pointer-events-none flex items-center justify-center gap-6 sm:gap-12 z-30 transition-opacity duration-300 ${
+              showControls && !isBuffering && !playbackError ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                skipSeconds(-10);
+              }}
+              className="pointer-events-auto p-3.5 sm:p-4 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md text-white border border-white/20 active:scale-90 transition-all shadow-xl"
+              aria-label="Voltar 10 segundos"
+              title="Voltar 10s"
+            >
+              <RotateCcw className="w-6 h-6 sm:w-8 sm:h-8" />
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlay();
+              }}
+              className="pointer-events-auto p-5 sm:p-6 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_35px_rgba(16,185,129,0.55)] active:scale-95 transition-all flex items-center justify-center ring-4 ring-white/20"
+              aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
+              title={isPlaying ? 'Pausar' : 'Reproduzir'}
+            >
+              {isPlaying ? (
+                <Pause className="w-8 h-8 sm:w-10 sm:h-10 fill-current" />
+              ) : (
+                <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-current ml-1" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                skipSeconds(10);
+              }}
+              className="pointer-events-auto p-3.5 sm:p-4 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md text-white border border-white/20 active:scale-90 transition-all shadow-xl"
+              aria-label="Avançar 10 segundos"
+              title="Avançar 10s"
+            >
+              <RotateCw className="w-6 h-6 sm:w-8 sm:h-8" />
+            </button>
+          </div>
+
           {/* Painel Inferior de Controles + Barra de Buffer Visual via Cache IndexedDB */}
           <div
-            className={`absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-t from-black/95 via-black/70 to-transparent flex flex-col gap-2.5 z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
-              }`}
+            className={`absolute bottom-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col gap-2.5 z-40 transition-opacity duration-300 ${
+              showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
           >
-            {/* BARRA DE PROGRESSO VISUAL DE BUFFER */}
+            {/* BARRA DE PROGRESSO VISUAL DE BUFFER OTIMIZADA PARA DEDO/TOUCH */}
             <div className="space-y-1">
-              <div className="relative w-full group/scrubber cursor-pointer py-2.5 flex items-center">
+              <div className="relative w-full group/scrubber cursor-pointer py-3.5 sm:py-2.5 flex items-center touch-none">
                 <div
-                  className="absolute left-0 right-0 h-2 bg-zinc-600/80 rounded-full overflow-hidden pointer-events-none border border-white/10"
+                  className="absolute left-0 right-0 h-2 sm:h-1.5 bg-zinc-600/80 rounded-full overflow-hidden pointer-events-none border border-white/10"
                   title="Cinza: segmentos pendentes · Verde: segmentos em cache"
                 >
                   {idbSnapshot.segments.map((seg, index) => (
@@ -2175,12 +2278,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
 
                 <div
-                  className="absolute left-0 h-2 bg-white/35 rounded-l-full pointer-events-none z-10 transition-all duration-75"
+                  className="absolute left-0 h-2 sm:h-1.5 bg-white/35 rounded-l-full pointer-events-none z-10 transition-all duration-75"
                   style={{ width: `${progressPercent}%` }}
                 />
 
                 <div
-                  className="absolute w-3.5 h-3.5 rounded-full bg-white ring-2 ring-emerald-400 shadow-lg pointer-events-none z-20 -translate-x-1/2 transition-transform group-hover/scrubber:scale-125"
+                  className="absolute w-4 h-4 sm:w-3.5 sm:h-3.5 rounded-full bg-white ring-2 ring-emerald-400 shadow-lg pointer-events-none z-20 -translate-x-1/2 transition-transform group-hover/scrubber:scale-125"
                   style={{ left: `${progressPercent}%` }}
                 />
 
@@ -2191,7 +2294,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   step={0.5}
                   value={currentTime}
                   onChange={handleSeek}
-                  className="w-full h-4 opacity-0 cursor-pointer accent-emerald-400 relative z-30"
+                  className="w-full h-10 sm:h-5 -top-3 sm:-top-1 opacity-0 cursor-pointer accent-emerald-400 absolute inset-0 z-30"
                   aria-label="Barra de progresso e buffer do vídeo"
                 />
               </div>
@@ -2200,7 +2303,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className="flex items-center gap-3 flex-wrap">
                   <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                    Buffer carregado: {idbSnapshot.cachedPercent}% ({formatCachedBytes(idbSnapshot.cachedBytes)})
+                    Buffer: {idbSnapshot.cachedPercent}% ({formatCachedBytes(idbSnapshot.cachedBytes)})
                   </span>
                   <span className="hidden sm:flex items-center gap-1.5 text-zinc-400">
                     <span className="w-2 h-2 rounded-full bg-zinc-500 inline-block" />
@@ -2214,11 +2317,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
 
             {/* Linha de Botões e Informações de Reprodução */}
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-2 sm:gap-3.5 flex-wrap">
+            <div className="flex items-center justify-between gap-2 sm:gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5 sm:gap-3.5 flex-wrap">
                 <button
                   onClick={togglePlay}
-                  className="p-2 sm:p-2.5 rounded-full bg-white hover:bg-slate-200 text-black transition-all transform active:scale-90"
+                  className="hidden sm:flex p-2 sm:p-2.5 rounded-full bg-white hover:bg-slate-200 text-black transition-all transform active:scale-90"
                   aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
                 >
                   {isPlaying ? (
@@ -2230,7 +2333,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                 <button
                   onClick={() => skipSeconds(-10)}
-                  className="p-2 text-white/70 hover:text-white transition-colors"
+                  className="hidden sm:flex p-2 text-white/70 hover:text-white transition-colors"
                   title="Voltar 10s"
                   aria-label="Voltar 10 segundos"
                 >
@@ -2239,7 +2342,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                 <button
                   onClick={() => skipSeconds(10)}
-                  className="p-2 text-white/70 hover:text-white transition-colors"
+                  className="hidden sm:flex p-2 text-white/70 hover:text-white transition-colors"
                   title="Avançar 10s"
                   aria-label="Avançar 10 segundos"
                 >

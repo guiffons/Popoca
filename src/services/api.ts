@@ -399,6 +399,9 @@ export const api = {
       seekSeconds?: number;
       preferPortugueseAudio?: boolean;
       audioTrackIndex?: number;
+      season?: number;
+      episode?: number;
+      fileIdx?: number;
     } = {}
   ): string {
     const params = new URLSearchParams({
@@ -408,6 +411,9 @@ export const api = {
     if (options.streamKey) params.set('_sk', options.streamKey);
     if (options.transcode) params.set('transcode', 'true');
     if (options.audioOnly) params.set('audioOnly', 'true');
+    if (typeof options.season === 'number') params.set('season', String(options.season));
+    if (typeof options.episode === 'number') params.set('episode', String(options.episode));
+    if (typeof options.fileIdx === 'number') params.set('fileIdx', String(options.fileIdx));
     params.set('preferPt', options.preferPortugueseAudio === false ? 'false' : 'true');
     if (typeof options.seekSeconds === 'number' && options.seekSeconds > 1) {
       params.set('seek', options.seekSeconds.toFixed(1));

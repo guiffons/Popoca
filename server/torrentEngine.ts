@@ -23,6 +23,9 @@ export interface StreamExtraOptions {
   seekSeconds?: number;
   preferPortugueseAudio?: boolean;
   audioTrackIndex?: number;
+  season?: number;
+  episode?: number;
+  fileIdx?: number;
 }
 
 export interface ActiveTorrentStats {
@@ -401,19 +404,78 @@ export class TorrentEngine {
     }
   }
 
-  findMainVideoFile(engine: TorrentStream.TorrentEngine): TorrentStream.TorrentFile | null {
+  findTargetVideoFile(
+    engine: TorrentStream.TorrentEngine,
+    fileIdx?: number,
+    season?: number,
+    episode?: number
+  ): TorrentStream.TorrentFile | null {
     if (!engine.files || engine.files.length === 0) return null;
+
+    // 1. Se fileIdx explícito e válido for fornecido (ex: mapeado do Torrentio para série/anime)
+    if (typeof fileIdx === 'number' && fileIdx >= 0 && fileIdx < engine.files.length) {
+      const target = engine.files[fileIdx];
+      for (const f of engine.files) {
+        if (f !== target) {
+          try { (f as any).deselect?.(); } catch {}
+        }
+      }
+      try { (target as any).select?.(); } catch {}
+      return target;
+    }
 
     const videoExts = ['.mp4', '.mkv', '.webm', '.m4v', '.mov', '.avi', '.ts'];
     const videoFiles = engine.files.filter((f) =>
       videoExts.some((ext) => f.name.toLowerCase().endsWith(ext))
     );
+    const candidateFiles = videoFiles.length > 0 ? videoFiles : engine.files;
 
-    if (videoFiles.length > 0) {
-      return videoFiles.reduce((prev, curr) => (curr.length > prev.length ? curr : prev));
+    // 2. Se for série ou anime com temporada/episódio especificado (ex: Naruto Shippuden)
+    if (typeof episode === 'number' && episode > 0) {
+      const epNum = episode;
+      const epPadded = epNum.toString().padStart(2, '0');
+      const epPadded3 = epNum.toString().padStart(3, '0');
+      const sNum = typeof season === 'number' && season > 0 ? season : undefined;
+
+      const patterns: RegExp[] = [];
+      if (sNum) {
+        patterns.push(new RegExp(`[sS]0*${sNum}[eE]0*${epNum}\\b`, 'i'));
+        patterns.push(new RegExp(`\\b${sNum}x0*${epNum}\\b`, 'i'));
+      }
+      patterns.push(new RegExp(`[eE]0*${epNum}\\b`, 'i'));
+      patterns.push(new RegExp(`\\bep\\.?\\s*0*${epNum}\\b`, 'i'));
+      patterns.push(new RegExp(`\\bepisode\\s*0*${epNum}\\b`, 'i'));
+      patterns.push(new RegExp(`\\b${epPadded}\\b`));
+      patterns.push(new RegExp(`\\b${epPadded3}\\b`));
+
+      for (const pat of patterns) {
+        const found = candidateFiles.find((f) => pat.test(f.name));
+        if (found) {
+          // Desmarca imediatamente todos os outros episódios do pack (aumenta velocidade em até 50x)
+          for (const f of engine.files) {
+            if (f !== found) {
+              try { (f as any).deselect?.(); } catch {}
+            }
+          }
+          try { (found as any).select?.(); } catch {}
+          return found;
+        }
+      }
     }
 
-    return engine.files.reduce((prev, curr) => (curr.length > prev.length ? curr : prev));
+    // 3. Fallback padrão: maior arquivo de vídeo
+    const main = candidateFiles.reduce((prev, curr) => (curr.length > prev.length ? curr : prev));
+    for (const f of engine.files) {
+      if (f !== main) {
+        try { (f as any).deselect?.(); } catch {}
+      }
+    }
+    try { (main as any).select?.(); } catch {}
+    return main;
+  }
+
+  findMainVideoFile(engine: TorrentStream.TorrentEngine): TorrentStream.TorrentFile | null {
+    return this.findTargetVideoFile(engine);
   }
 
   private retryPeersInternal(
@@ -980,7 +1042,7 @@ export class TorrentEngine {
     const hash = extractHash(magnetUri);
 
     const engine = await this.getOrAddEngine(magnetUri, trackerPriority);
-    const file = this.findMainVideoFile(engine);
+    const file = this.findTargetVideoFile(engine, extra.fileIdx, extra.season, extra.episode);
 
     if (!file) {
       this.scheduleCleanup(hash, 10000);

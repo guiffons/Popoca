@@ -23,6 +23,7 @@ export interface TorrentItem {
   stabilityScore: number;
   trackerPriority: TrackerPriorityMode;
   directUrl?: string;
+  fileIdx?: number;
 }
 
 export const TRACKER_PROFILES: Record<TrackerPriorityMode, string[]> = {
@@ -516,7 +517,8 @@ export class IndexerService {
         isPortugueseAudio: isPtAudio,
         source: cleanSource,
         stabilityScore,
-        trackerPriority
+        trackerPriority,
+        fileIdx: typeof st.fileIdx === 'number' ? st.fileIdx : undefined
       });
     }
 

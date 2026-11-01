@@ -92,6 +92,7 @@ export interface TorrentSource {
   stabilityScore?: number;
   trackerPriority?: TrackerPriorityMode;
   directUrl?: string;
+  fileIdx?: number;
 }
 
 export interface WatchHistoryItem {

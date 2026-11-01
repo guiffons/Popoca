@@ -23,7 +23,10 @@ import {
   Volume2,
   Radio,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown
 } from 'lucide-react';
 import {
   MediaItem,
@@ -143,6 +146,15 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
   const [isLoadingSeasonEpisodes, setIsLoadingSeasonEpisodes] = useState(false);
   const [visibleEpisodeCount, setVisibleEpisodeCount] = useState(30);
+  const [expandedEpOverviewId, setExpandedEpOverviewId] = useState<number | null>(null);
+  const seasonTabsRef = React.useRef<HTMLDivElement>(null);
+
+  const scrollSeasonTabs = (direction: 'left' | 'right') => {
+    if (seasonTabsRef.current) {
+      const scrollAmount = direction === 'left' ? -260 : 260;
+      seasonTabsRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   const currentSeason =
     seasonsState.find((s) => s.seasonNumber === selectedSeasonNumber) || seasonsState[0];
@@ -849,50 +861,94 @@ export const DetailModal: React.FC<DetailModalProps> = ({
           {/* SELETOR DE TEMPORADAS E EPISÓDIOS COM CONTAGEM EXATA */}
           {isSeriesOrAnime && seasonsState.length > 0 && (
             <div className="space-y-3 pt-2 w-full text-left">
-              <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center justify-between flex-wrap gap-2.5">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Tv className="w-4 h-4 text-slate-700 dark:text-white/70" />
                   <span>
                     Temporadas & Episódios ({seasonsState.length}{' '}
                     {seasonsState.length === 1 ? 'temporada' : 'temporadas'}
                     {currentSeason && (currentSeason.episodes.length || currentSeason.episodeCount) > 0
-                      ? ` · ${currentSeason.episodes.length || currentSeason.episodeCount} eps na atual`
+                      ? ` · ${currentSeason.episodes.length || currentSeason.episodeCount} eps`
                       : ''}
                     )
                   </span>
                 </h3>
 
-                {/* Abas de Temporada exibindo a quantidade real de episódios */}
-                <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 dark:bg-white/[0.05] rounded-xl overflow-x-auto no-scrollbar max-w-full">
-                  {seasonsState.map((s) => {
-                    const epTotal = s.episodes?.length || s.episodeCount || 0;
-                    const shortLabel = s.name.split(':')[0] || `Temp. ${s.seasonNumber}`;
-                    return (
-                      <button
-                        key={s.seasonNumber}
-                        onClick={() => handleSeasonChange(s.seasonNumber)}
-                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                          selectedSeasonNumber === s.seasonNumber
-                            ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-bold shadow-md'
-                            : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-slate-300/50 dark:hover:bg-white/10'
-                        }`}
-                      >
-                        <span>{shortLabel}</span>
-                        {epTotal > 0 && (
-                          <span
-                            className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                              selectedSeasonNumber === s.seasonNumber
-                                ? 'bg-white/20 dark:bg-black/15'
-                                : 'bg-slate-300/70 dark:bg-white/10'
-                            }`}
-                          >
-                            {epTotal}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                {/* Dropdown de Acesso Imediato + Setas de Rolagem */}
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <select
+                      value={selectedSeasonNumber}
+                      onChange={(e) => handleSeasonChange(Number(e.target.value))}
+                      className="appearance-none pl-3 pr-8 py-1.5 text-xs font-bold rounded-xl bg-slate-900 text-white dark:bg-white dark:text-black border border-slate-700 dark:border-white/20 shadow-md cursor-pointer focus:outline-none"
+                    >
+                      {seasonsState.map((s) => (
+                        <option
+                          key={s.seasonNumber}
+                          value={s.seasonNumber}
+                          className="bg-neutral-900 text-white"
+                        >
+                          {s.name || `Temporada ${s.seasonNumber}`} ({s.episodes?.length || s.episodeCount || 0} eps)
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-70" />
+                  </div>
+
+                  <div className="hidden sm:flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => scrollSeasonTabs('left')}
+                      className="p-1.5 rounded-lg glass-subtle hover:bg-slate-300 dark:hover:bg-white/10 text-slate-700 dark:text-white cursor-pointer"
+                      title="Rolar temporadas para a esquerda"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => scrollSeasonTabs('right')}
+                      className="p-1.5 rounded-lg glass-subtle hover:bg-slate-300 dark:hover:bg-white/10 text-slate-700 dark:text-white cursor-pointer"
+                      title="Rolar temporadas para a direita"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {/* Abas Horizontais com Suporte a Touch e Rolagem Suave */}
+              <div
+                ref={seasonTabsRef}
+                className="flex items-center gap-1.5 p-1 bg-slate-200/70 dark:bg-white/[0.05] rounded-xl overflow-x-auto touch-pan-x scroll-smooth no-scrollbar max-w-full"
+              >
+                {seasonsState.map((s) => {
+                  const epTotal = s.episodes?.length || s.episodeCount || 0;
+                  const shortLabel = s.name.split(':')[0] || `Temp. ${s.seasonNumber}`;
+                  return (
+                    <button
+                      key={s.seasonNumber}
+                      onClick={() => handleSeasonChange(s.seasonNumber)}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                        selectedSeasonNumber === s.seasonNumber
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-bold shadow-md'
+                          : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-slate-300/50 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <span>{shortLabel}</span>
+                      {epTotal > 0 && (
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                            selectedSeasonNumber === s.seasonNumber
+                              ? 'bg-white/20 dark:bg-black/15'
+                              : 'bg-slate-300/70 dark:bg-white/10'
+                          }`}
+                        >
+                          {epTotal}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
 
               {isLoadingSeasonEpisodes ? (
@@ -906,57 +962,103 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {currentSeason.episodes.slice(0, visibleEpisodeCount).map((ep) => {
                     const isSelected = selectedEpisodeNumber === ep.episodeNumber;
+                    const isExpanded = expandedEpOverviewId === ep.id;
                     return (
                       <div
                         key={ep.id}
                         onClick={() => handleSelectEpisode(ep.episodeNumber)}
-                        className={`p-3 rounded-xl cursor-pointer transition-all border flex items-center justify-between gap-3 shadow-sm ${
+                        className={`p-2.5 sm:p-3 rounded-xl cursor-pointer transition-all border flex flex-col gap-2 shadow-sm ${
                           isSelected
                             ? 'bg-slate-100 dark:bg-white/[0.1] border-slate-900/30 dark:border-white/30 ring-1 ring-slate-900/10 dark:ring-white/20'
                             : 'glass-subtle hover:bg-white/80 dark:hover:bg-white/[0.07] border-slate-200/80 dark:border-white/[0.05]'
                         }`}
                       >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div
-                            className={`w-10 h-10 rounded-lg flex items-center justify-center font-mono font-bold text-xs shrink-0 transition-colors ${
-                              isSelected
-                                ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-md'
-                                : 'bg-slate-200 dark:bg-white/10 text-slate-800 dark:text-white'
-                            }`}
-                          >
-                            {ep.episodeNumber}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
-                                {ep.title}
-                              </h4>
-                              {isSelected && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
-                                  Ativo
-                                </span>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                            {/* Miniatura do Episódio com Número */}
+                            <div className="w-16 h-11 sm:w-20 sm:h-12 rounded-lg overflow-hidden shrink-0 bg-black/30 dark:bg-black/50 relative border border-slate-200/50 dark:border-white/10">
+                              {ep.stillPath ? (
+                                <img
+                                  src={ep.stillPath}
+                                  alt={ep.title}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center font-mono font-bold text-xs bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-white">
+                                  {ep.episodeNumber}
+                                </div>
                               )}
+                              <div className="absolute top-1 left-1 px-1 rounded bg-black/75 text-[9px] font-mono font-bold text-white shadow-sm">
+                                #{ep.episodeNumber}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-white/50 mt-0.5">
-                              <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {ep.durationMinutes} min
-                              </span>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {ep.title}
+                                </h4>
+                                {isSelected && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
+                                    Selecionado
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-white/50 mt-0.5">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {ep.durationMinutes || 24} min
+                                </span>
+                                {ep.overview && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpandedEpOverviewId(isExpanded ? null : ep.id);
+                                    }}
+                                    className="text-[10px] underline underline-offset-2 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                                  >
+                                    {isExpanded ? 'Ocultar sinopse' : 'Ver sinopse'}
+                                  </button>
+                                )}
+                              </div>
                             </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayEpisode(ep, true);
+                              }}
+                              className="p-2 rounded-xl glass-subtle border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/15 transition-all cursor-pointer"
+                              title="Transmitir este episódio"
+                            >
+                              <Cast className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayEpisode(ep);
+                              }}
+                              className="flex items-center gap-1 px-3 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-extrabold rounded-xl shadow-md transition-transform active:scale-95 cursor-pointer"
+                            >
+                              <Play className="w-3 h-3 fill-current" />
+                              <span className="hidden sm:inline">Assistir</span>
+                            </button>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePlayEpisode(ep);
-                          }}
-                          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-black text-xs font-extrabold rounded-xl shadow-md shrink-0 transition-transform active:scale-95"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>Assistir</span>
-                        </button>
+                        {/* Sinopse Expansível do Episódio */}
+                        {isExpanded && ep.overview && (
+                          <div className="p-2.5 rounded-lg bg-black/5 dark:bg-white/[0.04] text-[11px] text-slate-600 dark:text-white/70 leading-relaxed border border-slate-200/50 dark:border-white/5 animate-in fade-in">
+                            {ep.overview}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
