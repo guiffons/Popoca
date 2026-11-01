@@ -8,5 +8,6 @@ coverage/
 *.db-journal
 *.db-wal
 *.db-shm
+cloudflared.exe
 .env*
 !.env.example

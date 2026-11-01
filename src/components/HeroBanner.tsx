@@ -119,14 +119,14 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
         onMouseLeave={() => setIsHovered(false)}
         className="relative w-full h-[430px] sm:h-[520px] lg:h-[620px] rounded-[24px] sm:rounded-[32px] overflow-hidden bg-[#07090E] select-none group shadow-[0_24px_60px_-15px_rgba(15,23,42,0.35)] dark:shadow-[0_28px_70px_-15px_rgba(0,0,0,0.75)] ring-1 ring-slate-900/10 dark:ring-white/[0.1]"
       >
-        {/* Imagem de Fundo com Transição Lenta e Gradual de Brilho Cinematográfico Apple TV+ */}
+        {/* Imagem de Fundo com Iluminação Suave e Gradual Cinematográfica estilo Apple TV */}
         <AnimatePresence mode="sync">
           <motion.div
             key={currentMedia.id}
-            initial={{ opacity: 0, scale: 1.03, filter: 'brightness(0.38) contrast(1.0)' }}
-            animate={{ opacity: 1, scale: 1, filter: 'brightness(0.62) contrast(1.06)' }}
-            exit={{ opacity: 0, filter: 'brightness(0.35)' }}
-            transition={{ duration: 1.5, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, scale: 1.02, filter: 'brightness(0.65) contrast(1.02)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'brightness(0.88) contrast(1.05) saturate(1.08)' }}
+            exit={{ opacity: 0, filter: 'brightness(0.60)' }}
+            transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1] }}
             className="absolute inset-0 bg-[#07090E]"
           >
             <LazyImage
@@ -136,15 +136,15 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               aspectRatio="auto"
               darkPlaceholder
               className="w-full h-full"
-              imgClassName="object-top contrast-[1.06] saturate-[1.05]"
+              imgClassName="object-top"
             />
           </motion.div>
         </AnimatePresence>
 
-        {/* Scrims Cinematográficos Apple TV+ (topo, base e lateral esquerda constantes) */}
-        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#07090E]/55 via-[#07090E]/20 to-transparent pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#07090E] via-[#07090E]/55 to-transparent pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#07090E]/90 via-[#07090E]/45 to-transparent sm:w-4/5 pointer-events-none" />
+        {/* Scrims Cinematográficos Apple TV+ com Iluminação Balanceada e Legibilidade Nítida */}
+        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#07090E]/60 via-[#07090E]/15 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#07090E] via-[#07090E]/40 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#07090E]/90 via-[#07090E]/40 to-transparent sm:w-3/4 pointer-events-none" />
 
         {/* Setas Laterais Discretas */}
         {slides.length > 1 && (

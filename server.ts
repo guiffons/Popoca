@@ -7,6 +7,7 @@
 
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import http from 'http';
@@ -78,6 +79,13 @@ async function bootstrap() {
 
   app.use(cors());
   app.use(express.json());
+
+  // Log de conexões para diagnóstico de rede local (Wi-Fi / Mobile / Smart TV)
+  app.use((req, _res, next) => {
+    const remoteIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+    console.log(`[Rede Popoca] ${req.method} ${req.url} de ${remoteIp}`);
+    next();
+  });
 
   // 1. Catálogo com prioridade pt-BR (Em Alta, Filmes, Séries, Animes)
   app.get('/api/catalog', async (req: Request, res: Response) => {
@@ -844,10 +852,27 @@ async function bootstrap() {
     });
   } else {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    app.use('*', async (req, res, next) => {
+      // Deixa endpoints de API ou arquivos passarem direto
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/@') || req.originalUrl.includes('.')) {
+        return next();
+      }
+      try {
+        const indexPath = path.resolve(__dirname, 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
