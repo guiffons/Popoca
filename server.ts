@@ -54,7 +54,7 @@ function getLocalLanIp(): string {
     if (candidates.length > 0) {
       return candidates[0].address;
     }
-  } catch {}
+  } catch { }
   return '127.0.0.1';
 }
 
@@ -73,6 +73,53 @@ function parsePriorityMode(val: unknown): TrackerPriorityMode | undefined {
   return undefined;
 }
 
+/**
+ * Cache em memória com TTL + deduplicação de requisições em andamento.
+ * Se 5 telas pedem o mesmo catálogo/torrent ao mesmo tempo, só 1 chamada externa é feita,
+ * e as próximas aberturas do mesmo título respondem instantaneamente.
+ */
+const responseCache = new Map<string, { at: number; ttl: number; value: unknown }>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+const RESPONSE_CACHE_MAX = 800;
+
+async function cachedFetch<T>(
+  key: string,
+  ttlMs: number,
+  loader: () => Promise<T>,
+  shouldCache: (value: T) => boolean = () => true
+): Promise<T> {
+  const hit = responseCache.get(key);
+  if (hit && Date.now() - hit.at < hit.ttl) {
+    return hit.value as T;
+  }
+  const pending = inflightRequests.get(key);
+  if (pending) return pending as Promise<T>;
+
+  const p = (async () => {
+    try {
+      const value = await loader();
+      if (shouldCache(value)) {
+        if (responseCache.size >= RESPONSE_CACHE_MAX) {
+          const oldestKey = responseCache.keys().next().value;
+          if (oldestKey !== undefined) responseCache.delete(oldestKey);
+        }
+        responseCache.set(key, { at: Date.now(), ttl: ttlMs, value });
+      }
+      return value;
+    } catch (err) {
+      // Em caso de falha da fonte externa, serve a última resposta conhecida (mesmo expirada)
+      if (hit) return hit.value as T;
+      throw err;
+    } finally {
+      inflightRequests.delete(key);
+    }
+  })();
+  inflightRequests.set(key, p);
+  return p;
+}
+
+const MIN = 60 * 1000;
+
 async function bootstrap() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -82,8 +129,14 @@ async function bootstrap() {
 
   // Log de conexões para diagnóstico de rede local (Wi-Fi / Mobile / Smart TV)
   app.use((req, _res, next) => {
-    const remoteIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
-    console.log(`[Rede Popoca] ${req.method} ${req.url} de ${remoteIp}`);
+    // Log enxuto: ignora assets do Vite e polling de status (reduz I/O de console que deixava tudo lento)
+    if (
+      req.url.startsWith('/api/') &&
+      !/^\/api\/(torrent\/stats|stream\/stats|stats|network)/.test(req.url)
+    ) {
+      const remoteIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+      console.log(`[Rede Popoca] ${req.method} ${req.url.slice(0, 140)} de ${remoteIp}`);
+    }
     next();
   });
 
@@ -92,7 +145,13 @@ async function bootstrap() {
     try {
       const category = (req.query.category as string) || 'trending';
       const page = parseInt(req.query.page as string, 10) || 1;
-      const items = await tmdbService.getCatalog(category, page);
+      const items = await cachedFetch(
+        `catalog|${category}|${page}`,
+        30 * MIN,
+        () => tmdbService.getCatalog(category, page),
+        (v) => Array.isArray(v) && v.length > 0
+      );
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=1800');
       res.json({ success: true, category, items });
     } catch (err: any) {
       console.error('[API /catalog] Erro:', err);
@@ -104,7 +163,12 @@ async function bootstrap() {
   app.get('/api/search', async (req: Request, res: Response) => {
     try {
       const q = (req.query.q as string) || '';
-      const results = await tmdbService.search(q);
+      const results = await cachedFetch(
+        `search|${q.trim().toLowerCase()}`,
+        10 * MIN,
+        () => tmdbService.search(q),
+        (v) => Array.isArray(v) && v.length > 0
+      );
       res.json({ success: true, count: results.length, results });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -127,7 +191,12 @@ async function bootstrap() {
     try {
       const id = parseInt(req.params.id, 10);
       const type = (req.query.type as 'movie' | 'tv' | 'anime') || 'movie';
-      const details = await tmdbService.getDetails(id, type);
+      const details = await cachedFetch(
+        `details|${type}|${id}`,
+        6 * 60 * MIN,
+        () => tmdbService.getDetails(id, type),
+        (v) => Boolean(v)
+      );
       if (!details) {
         res.status(404).json({ success: false, error: 'Título não encontrado' });
         return;
@@ -143,7 +212,12 @@ async function bootstrap() {
     try {
       const id = parseInt(req.params.id, 10);
       const seasonNumber = parseInt(req.params.seasonNumber, 10) || 1;
-      const episodes = await tmdbService.getSeasonEpisodes(id, seasonNumber);
+      const episodes = await cachedFetch(
+        `season|${id}|${seasonNumber}`,
+        6 * 60 * MIN,
+        () => tmdbService.getSeasonEpisodes(id, seasonNumber),
+        (v) => Array.isArray(v) && v.length > 0
+      );
       res.json({ success: true, seriesId: id, seasonNumber, episodes });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -166,16 +240,22 @@ async function bootstrap() {
         res.status(400).json({ success: false, error: 'Parâmetro title ou imdbId é obrigatório' });
         return;
       }
-      const torrents = await indexerService.findTorrents({
-        title,
-        originalTitle,
-        year,
-        imdbId,
-        mediaType,
-        season,
-        episode,
-        trackerPriority
-      });
+      const torrents = await cachedFetch(
+        `torrents|${imdbId || ''}|${title}|${year || ''}|${mediaType}|${season ?? ''}|${episode ?? ''}|${trackerPriority || ''}`,
+        20 * MIN,
+        () =>
+          indexerService.findTorrents({
+            title,
+            originalTitle,
+            year,
+            imdbId,
+            mediaType,
+            season,
+            episode,
+            trackerPriority
+          }),
+        (v) => Array.isArray(v) && v.length > 0
+      );
       res.json({
         success: true,
         count: torrents.length,
@@ -288,8 +368,7 @@ async function bootstrap() {
 
       for (const candidate of topCandidates) {
         console.log(
-          `[TMDB Stream] Tentando streaming para ID ${tmdbId} via torrent ${candidate.quality} [${
-            candidate.isPortugueseAudio ? 'PT-BR' : 'Original'
+          `[TMDB Stream] Tentando streaming para ID ${tmdbId} via torrent ${candidate.quality} [${candidate.isPortugueseAudio ? 'PT-BR' : 'Original'
           }] (${candidate.seeds} seeds, score=${candidate.stabilityScore}): ${candidate.title}`
         );
         try {
@@ -378,7 +457,7 @@ async function bootstrap() {
             if (typeof m === 'string' && m && !magnetsToTry.includes(m)) magnetsToTry.push(m);
           });
         }
-      } catch {}
+      } catch { }
     }
 
     let orderedMagnets = magnetsToTry;
@@ -447,7 +526,7 @@ async function bootstrap() {
       res.status(400).json({ error: 'Magnet URI ausente' });
       return;
     }
-    torrentEngine.preload(magnet, trackerPriority).catch(() => {});
+    torrentEngine.preload(magnet, trackerPriority).catch(() => { });
     res.json({ success: true, status: 'preloading_initiated' });
   });
 
@@ -660,7 +739,7 @@ async function bootstrap() {
       req.on('close', () => {
         try {
           upstreamReq.destroy();
-        } catch {}
+        } catch { }
       });
       upstreamReq.on('error', () => {
         if (!res.headersSent) res.status(502).end();

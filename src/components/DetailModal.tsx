@@ -72,25 +72,25 @@ const TRACKER_PRIORITY_OPTIONS: {
   shortLabel: string;
   hint: string;
 }[] = [
-  {
-    id: 'pt-br-stability',
-    label: '🇧🇷 PT-BR & Estabilidade',
-    shortLabel: '🇧🇷 PT-BR Estável',
-    hint: 'Prioriza trackers com maior disponibilidade dublada/dual áudio em português e seeds estáveis'
-  },
-  {
-    id: 'ultra-speed',
-    label: '⚡ Ultra Velocidade',
-    shortLabel: '⚡ Ultra Rápido',
-    hint: 'Prioriza maior taxa de seeds por GB (WEB-DL MP4 leve) para início quase instantâneo'
-  },
-  {
-    id: 'global-balanced',
-    label: '🌐 Global Balanceado',
-    shortLabel: '🌐 Global',
-    hint: 'Equilibra trackers internacionais e brasileiros em todas as resoluções'
-  }
-];
+    {
+      id: 'pt-br-stability',
+      label: '🇧🇷 PT-BR & Estabilidade',
+      shortLabel: '🇧🇷 PT-BR Estável',
+      hint: 'Prioriza trackers com maior disponibilidade dublada/dual áudio em português e seeds estáveis'
+    },
+    {
+      id: 'ultra-speed',
+      label: '⚡ Ultra Velocidade',
+      shortLabel: '⚡ Ultra Rápido',
+      hint: 'Prioriza maior taxa de seeds por GB (WEB-DL MP4 leve) para início quase instantâneo'
+    },
+    {
+      id: 'global-balanced',
+      label: '🌐 Global Balanceado',
+      shortLabel: '🌐 Global',
+      hint: 'Equilibra trackers internacionais e brasileiros em todas as resoluções'
+    }
+  ];
 
 export const DetailModal: React.FC<DetailModalProps> = ({
   media,
@@ -277,7 +277,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   savedHist.duration > 60
                     ? savedHist.duration
                     : ((hydratedMedia.runtime || 115) * 60);
-                api.prefetchNextChunks(best.magnetUri, savedHist.currentTime, estDur).catch(() => {});
+                api.prefetchNextChunks(best.magnetUri, savedHist.currentTime, estDur).catch(() => { });
               }
             }
           }
@@ -439,7 +439,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
   const handleCopyMagnet = (t: TorrentSource) => {
     if (t.magnetUri) {
-      navigator.clipboard.writeText(t.magnetUri).catch(() => {});
+      navigator.clipboard.writeText(t.magnetUri).catch(() => { });
       setCopiedTorrentId(t.id);
       setTimeout(() => setCopiedTorrentId(null), 2000);
     }
@@ -505,8 +505,8 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   });
   const canResumeSavedPoint = Boolean(
     savedHistoryEntry &&
-      savedHistoryEntry.currentTime >= 15 &&
-      savedHistoryEntry.progressPercent < 96
+    savedHistoryEntry.currentTime >= 15 &&
+    savedHistoryEntry.progressPercent < 96
   );
 
   // Iniciar reprodução selecionando um torrent específico
@@ -527,7 +527,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto bg-black/85 backdrop-blur-2xl animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto bg-black/85 backdrop-blur-2xl animate-in fade-in duration-200">
       {/* Toast Feedback */}
       {reviewSavedToast && (
         <div className="fixed top-6 right-6 z-50 glass-dropdown px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-900 dark:text-white border border-slate-200 dark:border-white/20 shadow-2xl flex items-center gap-2 animate-in slide-in-from-top">
@@ -617,11 +617,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleSelectAudioFilter('pt-br')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${
-                      selectedAudio === 'pt-br'
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${selectedAudio === 'pt-br'
                         ? 'bg-emerald-600 text-white shadow-sm'
                         : 'text-slate-700 dark:text-white/70 hover:text-black dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     <Volume2 className="w-3.5 h-3.5" />
                     <span>Dublado PT-BR {torrents.length > 0 ? `(${ptBrCount})` : ''}</span>
@@ -629,11 +628,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleSelectAudioFilter('original')}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      selectedAudio === 'original'
+                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${selectedAudio === 'original'
                         ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm'
                         : 'text-slate-700 dark:text-white/70 hover:text-black dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     Original / Inglês {torrents.length > 0 ? `(${origCount})` : ''}
                   </button>
@@ -654,11 +652,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                         key={q.id}
                         type="button"
                         onClick={() => handleSelectFixedQuality(q.id)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
-                          active
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${active
                             ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm'
                             : 'text-slate-700 dark:text-white/70 hover:text-black dark:hover:text-white'
-                        }`}
+                          }`}
                       >
                         <span>{q.label}</span>
                         <span className={`text-[10px] font-medium ${active ? 'opacity-75' : 'opacity-50'}`}>
@@ -689,12 +686,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <Play className="w-4 h-4 fill-current" />
                   <span>
                     {canResumeSavedPoint
-                      ? `Continuar de ${formatResumeClock(savedHistoryEntry!.currentTime)}${
-                          selectedQuality !== 'all' ? ` · ${selectedQuality}` : ''
-                        }`
-                      : `Assistir em ${selectedAudio === 'original' ? 'Inglês' : 'Português'}${
-                          selectedQuality !== 'all' ? ` · ${selectedQuality}` : ''
-                        }`}
+                      ? `Continuar de ${formatResumeClock(savedHistoryEntry!.currentTime)}${selectedQuality !== 'all' ? ` · ${selectedQuality}` : ''
+                      }`
+                      : `Assistir em ${selectedAudio === 'original' ? 'Inglês' : 'Português'}${selectedQuality !== 'all' ? ` · ${selectedQuality}` : ''
+                      }`}
                   </span>
                 </button>
 
@@ -751,11 +746,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={handleToggleWatched}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                    isWatched
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${isWatched
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-bold shadow-md'
                       : 'glass-subtle text-slate-700 hover:text-black dark:text-white/70 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>{isWatched ? 'Já Visto' : 'Marcar Visto'}</span>
@@ -763,11 +757,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
                 <button
                   onClick={handleToggleLike}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                    isLiked
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${isLiked
                       ? 'bg-slate-900 text-white dark:bg-neutral-200 dark:text-black font-bold shadow-md'
                       : 'glass-subtle text-slate-700 hover:text-black dark:text-white/70 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-current' : ''}`} />
                   <span>{isLiked ? 'Curtido' : 'Curtir'}</span>
@@ -775,11 +768,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 
                 <button
                   onClick={handleToggleWatchlist}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                    inWatchlist
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${inWatchlist
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-bold shadow-md'
                       : 'glass-subtle text-slate-700 hover:text-black dark:text-white/70 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/10'
-                  }`}
+                    }`}
                 >
                   <Bookmark className={`w-3.5 h-3.5 ${inWatchlist ? 'fill-current' : ''}`} />
                   <span>Watchlist</span>
@@ -826,9 +818,8 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                     className="p-1 text-amber-400 hover:scale-125 transition-transform"
                   >
                     <Star
-                      className={`w-5 h-5 ${
-                        (hoverRating || userRating) >= star ? 'fill-current' : 'text-slate-300 dark:text-white/20'
-                      }`}
+                      className={`w-5 h-5 ${(hoverRating || userRating) >= star ? 'fill-current' : 'text-slate-300 dark:text-white/20'
+                        }`}
                     />
                   </button>
                 ))}
@@ -928,20 +919,18 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                     <button
                       key={s.seasonNumber}
                       onClick={() => handleSeasonChange(s.seasonNumber)}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer shrink-0 ${
-                        selectedSeasonNumber === s.seasonNumber
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer shrink-0 ${selectedSeasonNumber === s.seasonNumber
                           ? 'bg-slate-900 text-white dark:bg-white dark:text-black font-bold shadow-md'
                           : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-slate-300/50 dark:hover:bg-white/10'
-                      }`}
+                        }`}
                     >
                       <span>{shortLabel}</span>
                       {epTotal > 0 && (
                         <span
-                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
-                            selectedSeasonNumber === s.seasonNumber
+                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${selectedSeasonNumber === s.seasonNumber
                               ? 'bg-white/20 dark:bg-black/15'
                               : 'bg-slate-300/70 dark:bg-white/10'
-                          }`}
+                            }`}
                         >
                           {epTotal}
                         </span>
@@ -967,11 +956,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                       <div
                         key={ep.id}
                         onClick={() => handleSelectEpisode(ep.episodeNumber)}
-                        className={`p-2.5 sm:p-3 rounded-xl cursor-pointer transition-all border flex flex-col gap-2 shadow-sm ${
-                          isSelected
+                        className={`p-2.5 sm:p-3 rounded-xl cursor-pointer transition-all border flex flex-col gap-2 shadow-sm ${isSelected
                             ? 'bg-slate-100 dark:bg-white/[0.1] border-slate-900/30 dark:border-white/30 ring-1 ring-slate-900/10 dark:ring-white/20'
                             : 'glass-subtle hover:bg-white/80 dark:hover:bg-white/[0.07] border-slate-200/80 dark:border-white/[0.05]'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
@@ -1123,11 +1111,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                     type="button"
                     title={opt.hint}
                     onClick={() => handleChangeTrackerPriority(opt.id)}
-                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                      trackerPriority === opt.id
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${trackerPriority === opt.id
                         ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400/40'
                         : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/10'
-                    }`}
+                      }`}
                   >
                     {opt.shortLabel}
                   </button>
@@ -1141,32 +1128,29 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               <div className="flex items-center gap-1 p-1 bg-slate-200/80 dark:bg-white/[0.05] rounded-xl border border-slate-300/60 dark:border-white/[0.06] overflow-x-auto no-scrollbar max-w-full">
                 <button
                   onClick={() => handleSelectAudioFilter('all')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${
-                    selectedAudio === 'all'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${selectedAudio === 'all'
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm font-bold'
                       : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   Todos ({torrents.length})
                 </button>
                 <button
                   onClick={() => handleSelectAudioFilter('pt-br')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 ${
-                    selectedAudio === 'pt-br'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 ${selectedAudio === 'pt-br'
                       ? 'bg-emerald-600 text-white font-bold shadow-md ring-1 ring-emerald-400/40'
                       : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10'
-                  }`}
+                    }`}
                 >
                   <Volume2 className="w-3.5 h-3.5 shrink-0" />
                   <span>PT-BR ({ptBrCount})</span>
                 </button>
                 <button
                   onClick={() => handleSelectAudioFilter('original')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${
-                    selectedAudio === 'original'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${selectedAudio === 'original'
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm font-bold'
                       : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   Original ({origCount})
                 </button>
@@ -1176,31 +1160,28 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               <div className="flex items-center gap-1 p-1 bg-slate-200/80 dark:bg-white/[0.05] rounded-xl border border-slate-300/60 dark:border-white/[0.06] overflow-x-auto no-scrollbar max-w-full">
                 <button
                   onClick={() => setSelectedFormat('all')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${
-                    selectedFormat === 'all'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${selectedFormat === 'all'
                       ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm font-bold'
                       : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   Formatos ({torrents.length})
                 </button>
                 <button
                   onClick={() => setSelectedFormat('WEB-DL')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1 ${
-                    selectedFormat === 'WEB-DL'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1 ${selectedFormat === 'WEB-DL'
                       ? 'bg-sky-600 text-white font-bold shadow-md ring-1 ring-sky-400/40'
                       : 'text-sky-700 dark:text-sky-400 hover:bg-sky-500/10'
-                  }`}
+                    }`}
                 >
                   <span>WEB-DL ({webdlCount})</span>
                 </button>
                 <button
                   onClick={() => setSelectedFormat('Bluray')}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1 ${
-                    selectedFormat === 'Bluray'
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all flex items-center gap-1 ${selectedFormat === 'Bluray'
                       ? 'bg-purple-600 text-white font-bold shadow-md ring-1 ring-purple-400/40'
                       : 'text-purple-700 dark:text-purple-400 hover:bg-purple-500/10'
-                  }`}
+                    }`}
                 >
                   <span>BluRay ({blurayCount})</span>
                 </button>
@@ -1219,11 +1200,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <button
                     key={q.id}
                     onClick={() => handleSelectFixedQuality(q.id)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${
-                      selectedQuality === q.id
+                    className={`px-2.5 py-1 text-xs font-semibold rounded-lg whitespace-nowrap transition-all ${selectedQuality === q.id
                         ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm font-bold'
                         : 'text-slate-600 dark:text-white/60 hover:text-black dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     {q.label}
                   </button>
@@ -1254,11 +1234,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                         )}
 
                         <span
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md font-mono ${
-                            torrent.format === 'WEB-DL'
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md font-mono ${torrent.format === 'WEB-DL'
                               ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/25'
                               : 'bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/25'
-                          }`}
+                            }`}
                         >
                           {torrent.format || 'WEB-DL'}
                         </span>

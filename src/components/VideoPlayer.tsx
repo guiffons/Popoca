@@ -324,8 +324,73 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showSourcesMenu, setShowSourcesMenu] = useState(false);
   const [showNetworkPanel, setShowNetworkPanel] = useState(false);
   const [showCastModal, setShowCastModal] = useState(Boolean(initialOpenCastModal));
+  const [showMobileSettingsSheet, setShowMobileSettingsSheet] = useState(false);
   const [lanInfo, setLanInfo] = useState<{ lanIp: string; port: number; lanOrigin: string } | null>(null);
   const [copiedCastField, setCopiedCastField] = useState<'tv' | 'stream' | null>(null);
+
+  // Mini Player redimensionável e arrastável estilo Netflix
+  const [miniWidth, setMiniWidth] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 640 ? 180 : 340
+  );
+  const [miniPos, setMiniPos] = useState<{ x: number; y: number } | null>(null);
+  const miniDragRef = useRef<{
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    hasMoved: boolean;
+  } | null>(null);
+  const miniResizeRef = useRef<{
+    startX: number;
+    origW: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isMini) return;
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+      if (miniResizeRef.current) {
+        const dx = miniResizeRef.current.startX - clientX;
+        const maxW = Math.min(window.innerWidth - 20, 500);
+        const nextW = Math.max(140, Math.min(maxW, miniResizeRef.current.origW + dx));
+        setMiniWidth(nextW);
+        return;
+      }
+
+      if (miniDragRef.current) {
+        const dx = clientX - miniDragRef.current.startX;
+        const dy = clientY - miniDragRef.current.startY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          miniDragRef.current.hasMoved = true;
+        }
+        const maxX = Math.max(10, window.innerWidth - miniWidth - 10);
+        const maxY = Math.max(10, window.innerHeight - 120);
+        const newX = Math.max(10, Math.min(maxX, miniDragRef.current.origX + dx));
+        const newY = Math.max(10, Math.min(maxY, miniDragRef.current.origY + dy));
+        setMiniPos({ x: newX, y: newY });
+      }
+    };
+
+    const handlePointerUp = () => {
+      miniDragRef.current = null;
+      miniResizeRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+    };
+  }, [isMini, miniWidth]);
 
   const closeAllMenus = useCallback(() => {
     setShowSpeedMenu(false);
@@ -334,6 +399,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setShowAudioMenu(false);
     setShowSourcesMenu(false);
     setShowNetworkPanel(false);
+    setShowMobileSettingsSheet(false);
   }, []);
 
   /**
@@ -1437,9 +1503,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ref={containerRef}
       onMouseMove={isMini ? undefined : handleMouseMove}
       onTouchStart={isMini ? undefined : handleTouchStart}
+      style={
+        isMini
+          ? {
+              width: `${miniWidth}px`,
+              left: miniPos ? `${miniPos.x}px` : undefined,
+              top: miniPos ? `${miniPos.y}px` : undefined,
+              right: miniPos ? 'auto' : undefined,
+              bottom: miniPos ? 'auto' : undefined
+            }
+          : undefined
+      }
       className={
         isMini
-          ? 'dark fixed z-[70] right-3 bottom-[96px] md:right-6 md:bottom-6 w-[min(320px,calc(100vw-24px))] sm:w-[380px] lg:w-[420px] rounded-2xl overflow-hidden bg-black text-white select-none shadow-[0_24px_60px_rgba(0,0,0,0.55)] ring-1 ring-white/15 group/mini animate-in fade-in slide-in-from-bottom-4 duration-300'
+          ? 'dark fixed z-[70] right-3 bottom-[96px] md:right-6 md:bottom-6 rounded-2xl overflow-hidden bg-black text-white select-none shadow-[0_24px_60px_rgba(0,0,0,0.65)] ring-1 ring-white/20 group/mini animate-in fade-in slide-in-from-bottom-4 duration-300'
           : 'dark fixed inset-0 z-50 bg-black text-white flex items-center justify-center select-none overflow-hidden'
       }
     >
@@ -1681,30 +1758,80 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Mini Player flutuante (estilo YouTube) */}
+      {/* Mini Player flutuante redimensionável e arrastável estilo Netflix */}
       {isMini && (
         <>
-          <div className="absolute inset-x-0 top-0 aspect-video">
+          {/* Handle de redimensionamento na quinha superior esquerda (igual Netflix) */}
+          <div
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              miniResizeRef.current = { startX: e.clientX, origW: miniWidth };
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              miniResizeRef.current = { startX: e.touches[0].clientX, origW: miniWidth };
+            }}
+            className="absolute top-0 left-0 w-8 h-8 z-50 cursor-nwse-resize flex items-start justify-start p-1.5 text-white/70 hover:text-white transition-colors touch-none"
+            title="Arraste na quinha para redimensionar o mini player"
+          >
+            <div className="w-3.5 h-3.5 border-t-2 border-l-2 border-white/80 rounded-tl shadow-lg" />
+          </div>
+
+          <div
+            onMouseDown={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest('button')) return;
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniDragRef.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  origX: rect.left,
+                  origY: rect.top,
+                  hasMoved: false
+                };
+              }
+            }}
+            onTouchStart={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest('button')) return;
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniDragRef.current = {
+                  startX: e.touches[0].clientX,
+                  startY: e.touches[0].clientY,
+                  origX: rect.left,
+                  origY: rect.top,
+                  hasMoved: false
+                };
+              }
+            }}
+            className="absolute inset-x-0 top-0 aspect-video cursor-move select-none"
+          >
             {isBuffering && !playbackError && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/35 pointer-events-none">
-                <Loader2 className="w-7 h-7 text-white/90 animate-spin" />
+                <Loader2 className="w-6 h-6 text-white/90 animate-spin" />
               </div>
             )}
             {playbackError && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/75 px-4 text-center">
-                <span className="text-xs font-semibold text-white/90">Pausado em {formatTime(currentTime)}</span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/75 px-3 text-center">
+                <span className="text-[10px] font-semibold text-white/90">Pausado em {formatTime(currentTime)}</span>
                 <button
                   type="button"
                   onClick={() => reconnectStreamAtTime(lastKnownTimeRef.current, true)}
-                  className="px-3 py-1.5 rounded-full bg-white text-black text-[11px] font-bold"
+                  className="px-2.5 py-1 rounded-full bg-white text-black text-[10px] font-bold"
                 >
-                  Continuar daqui
+                  Continuar
                 </button>
               </div>
             )}
 
             <div
-              onClick={onExpand}
+              onClick={() => {
+                if (!miniDragRef.current?.hasMoved) {
+                  onExpand?.();
+                }
+              }}
               className="absolute inset-0 cursor-pointer bg-gradient-to-b from-black/55 via-transparent to-black/45 opacity-0 group-hover/mini:opacity-100 transition-opacity duration-200 flex items-center justify-center"
             >
               <button
@@ -1713,10 +1840,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   e.stopPropagation();
                   togglePlay();
                 }}
-                className="w-12 h-12 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-md border border-white/25 flex items-center justify-center transition-transform active:scale-90"
+                className="w-10 h-10 rounded-full bg-white/25 hover:bg-white/35 backdrop-blur-md border border-white/25 flex items-center justify-center transition-transform active:scale-90"
                 aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
               >
-                {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+                {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
               </button>
               <button
                 type="button"
@@ -1724,11 +1851,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   e.stopPropagation();
                   onExpand?.();
                 }}
-                className="absolute top-2 left-2 p-1.5 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
+                className="absolute top-2 left-6 p-1 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
                 aria-label="Expandir player"
                 title="Expandir"
               >
-                <Maximize2 className="w-4 h-4" />
+                <Maximize2 className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
@@ -1736,43 +1863,81 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   e.stopPropagation();
                   onClose();
                 }}
-                className="absolute top-2 right-2 p-1.5 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
+                className="absolute top-2 right-2 p-1 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
                 aria-label="Fechar player"
                 title="Fechar"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <div className="absolute bottom-0 inset-x-0 h-[3px] bg-white/20 pointer-events-none">
-              <div className="h-full bg-white transition-[width] duration-200" style={{ width: `${progressPercent}%` }} />
+              <div className="h-full bg-emerald-400 transition-[width] duration-200" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 pl-3 pr-1.5 py-2 bg-[#0D1016]">
-            <button type="button" onClick={onExpand} className="min-w-0 flex-1 text-left">
-              <p className="text-[13px] font-semibold text-white truncate">{media.title}</p>
-              <p className="text-[11px] text-white/55 truncate">
+          <div
+            onMouseDown={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest('button')) return;
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniDragRef.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  origX: rect.left,
+                  origY: rect.top,
+                  hasMoved: false
+                };
+              }
+            }}
+            onTouchStart={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.closest('button')) return;
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniDragRef.current = {
+                  startX: e.touches[0].clientX,
+                  startY: e.touches[0].clientY,
+                  origX: rect.left,
+                  origY: rect.top,
+                  hasMoved: false
+                };
+              }
+            }}
+            className="flex items-center gap-2 pl-2.5 pr-1.5 py-1.5 bg-[#0D1016] cursor-move select-none"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (!miniDragRef.current?.hasMoved) {
+                  onExpand?.();
+                }
+              }}
+              className="min-w-0 flex-1 text-left"
+            >
+              <p className="text-[11px] sm:text-xs font-semibold text-white truncate">{media.title}</p>
+              <p className="text-[9px] sm:text-[10px] text-white/55 truncate">
                 {episode
-                  ? `T${episode.seasonNumber} · E${episode.episodeNumber} · ${episode.title}`
-                  : `${currentTorrent.quality} · ${currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Orig'} · ${formatTime(currentTime)}`}
+                  ? `T${episode.seasonNumber} · E${episode.episodeNumber}`
+                  : `${currentTorrent.quality} · ${currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Orig'}`}
               </p>
             </button>
             <button
               type="button"
               onClick={togglePlay}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-full hover:bg-white/10 transition-colors shrink-0"
               aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
             >
-              {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+              {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-full hover:bg-white/10 transition-colors shrink-0"
               aria-label="Fechar player"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </>
@@ -1908,14 +2073,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* Painel Superior de Controles */}
           <div
-            className={`absolute top-0 left-0 right-0 p-4 sm:p-6 bg-gradient-to-b from-black/85 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            className={`absolute top-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
               }`}
           >
-            <div className="flex items-center gap-3 min-w-0 flex-1 mr-4">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 mr-2 sm:mr-4">
               {onMinimize ? (
                 <button
                   onClick={handleMinimize}
-                  className="p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
+                  className="p-1.5 sm:p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
                   aria-label="Minimizar player"
                   title="Minimizar e continuar navegando"
                 >
@@ -1924,17 +2089,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ) : (
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
+                  className="p-1.5 sm:p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
                   aria-label="Voltar"
                 >
                   <X className="w-5 h-5" />
                 </button>
               )}
-              <div className="min-w-0">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white truncate">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white truncate max-w-[170px] xs:max-w-[240px] sm:max-w-md">
                   {displayTitle}
                 </h3>
-                <div className="flex items-center gap-2 text-[11px] text-white/60 flex-wrap">
+                <div className="hidden sm:flex items-center gap-2 text-[11px] text-white/60 flex-wrap">
                   <span className="font-bold text-white">{currentTorrent.quality} Fixo</span>
                   <span aria-hidden="true">·</span>
                   <span
@@ -1949,9 +2114,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </div>
 
-            {/* Controles Superiores Direitos: Painel de Rede + Fontes */}
-            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-              <div className="relative">
+            {/* Controles Superiores Direitos: Painel de Rede + Fontes (Desktop) */}
+            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+              <div className="hidden sm:block relative">
                 <button
                   onClick={() => {
                     const next = !showNetworkPanel;
@@ -2093,9 +2258,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 )}
               </div>
 
-              {/* Lista Completa de Fontes Separadas por Idioma */}
+              {/* Lista Completa de Fontes Separadas por Idioma (Desktop) */}
               {torrentsPool.length > 1 && (
-                <div className="relative">
+                <div className="hidden sm:block relative">
                   <button
                     onClick={() => {
                       const next = !showSourcesMenu;
@@ -2392,8 +2557,76 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
               </div>
 
-              {/* Lado Direito: Idioma/Áudio, 3 Qualidades Fixas, Legendas, Velocidade, PiP, Fullscreen */}
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              {/* Lado Direito MOBILE (sm:hidden) — Enxuto, sem transbordar! */}
+              <div className="sm:hidden flex items-center gap-1.5 shrink-0">
+                {/* Botão rápido Dublado PT-BR / Original */}
+                <button
+                  type="button"
+                  onClick={() => handleSwitchLanguageMode(!currentTorrent.isPortugueseAudio, undefined)}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors ${currentTorrent.isPortugueseAudio
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-white/10 text-white/80 border-white/15'
+                    }`}
+                  title="Alternar Áudio Dublado PT-BR / Original"
+                >
+                  {currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Orig'}
+                </button>
+
+                {/* Botão Transmitir Mobile */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAllMenus();
+                    setShowCastModal(true);
+                  }}
+                  className="p-1.5 text-white/80 hover:text-white"
+                  title="Transmitir para TV"
+                >
+                  <Cast className="w-4 h-4 text-emerald-400" />
+                </button>
+
+                {/* Botão Legendas Rápido */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedSubtitleId !== 'off') {
+                      setSelectedSubtitleId('off');
+                    } else if (subtitleTracks.length > 0) {
+                      setSelectedSubtitleId(subtitleTracks[0].id);
+                    } else {
+                      setShowMobileSettingsSheet(true);
+                    }
+                  }}
+                  className={`p-1.5 transition-colors ${selectedSubtitleId !== 'off' ? 'text-emerald-400' : 'text-white/70'
+                    }`}
+                  title="Legendas"
+                >
+                  <Subtitles className="w-4 h-4" />
+                </button>
+
+                {/* Botão de Opções / Ajustes (Abre Bottom Sheet nativo) */}
+                <button
+                  type="button"
+                  onClick={() => setShowMobileSettingsSheet(true)}
+                  className="p-1.5 text-white/80 hover:text-white"
+                  title="Opções (Qualidade, Velocidade, Áudio)"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                </button>
+
+                {/* Tela Cheia */}
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="p-1.5 text-white/80 hover:text-white"
+                  title="Tela Cheia"
+                >
+                  {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                </button>
+              </div>
+
+              {/* Lado Direito DESKTOP (hidden sm:flex) — Todas as ferramentas detalhadas */}
+              <div className="hidden sm:flex items-center gap-1.5 sm:gap-2">
                 {/* SELETOR DE IDIOMA / FAIXA DE ÁUDIO (PT-BR vs Original + Dual Áudio) */}
                 <div className="relative">
                   <button
@@ -2731,6 +2964,190 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             </div>
           </div>
+
+          {/* MOBILE BOTTOM SHEET (Painel Deslizante estilo Netflix para Celular) */}
+          {showMobileSettingsSheet && (
+            <div
+              onClick={() => setShowMobileSettingsSheet(false)}
+              className="sm:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end animate-in fade-in duration-200"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-[#121620] border-t border-white/20 rounded-t-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-300 text-white"
+              >
+                {/* Header do Sheet */}
+                <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="w-4 h-4 text-emerald-400" />
+                    <span className="font-bold text-sm">Opções de Reprodução</span>
+                  </div>
+                  <button
+                    onClick={() => setShowMobileSettingsSheet(false)}
+                    className="p-1 rounded-full bg-white/10 text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Qualidade */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Qualidade</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {FIXED_QUALITY_OPTIONS.map((q) => (
+                      <button
+                        key={q.id}
+                        onClick={() => {
+                          handleSelectFixedQuality(q.id);
+                        }}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
+                          preferredQuality === q.id
+                            ? 'bg-emerald-500 text-black border-emerald-400'
+                            : 'bg-white/5 text-white/80 border-white/10'
+                        }`}
+                      >
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Velocidade */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Velocidade</label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[0.75, 1, 1.25, 1.5, 2].map((spd) => (
+                      <button
+                        key={spd}
+                        onClick={() => changeSpeed(spd)}
+                        className={`py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
+                          playbackSpeed === spd
+                            ? 'bg-white text-black border-white'
+                            : 'bg-white/5 text-white/80 border-white/10'
+                        }`}
+                      >
+                        {spd}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Áudio & Idioma */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Áudio & Dublagem</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => handleSwitchLanguageMode(true, undefined)}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
+                        currentTorrent.isPortugueseAudio
+                          ? 'bg-emerald-500 text-black border-emerald-400'
+                          : 'bg-white/5 text-white/80 border-white/10'
+                      }`}
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Dublado PT-BR</span>
+                    </button>
+                    <button
+                      onClick={() => handleSwitchLanguageMode(false, undefined)}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
+                        !currentTorrent.isPortugueseAudio
+                          ? 'bg-white text-black border-white'
+                          : 'bg-white/5 text-white/80 border-white/10'
+                      }`}
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>Original / Inglês</span>
+                    </button>
+                  </div>
+
+                  {currentTorrent.isPortugueseAudio && (
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        onClick={() => handleSwitchLanguageMode(true, 0)}
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
+                          audioTrackOverride === 0
+                            ? 'bg-white text-black font-bold border-white'
+                            : 'bg-white/5 text-white/70 border-white/10'
+                        }`}
+                      >
+                        Dual: Forçar Faixa 1
+                      </button>
+                      <button
+                        onClick={() => handleSwitchLanguageMode(true, 1)}
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
+                          audioTrackOverride === 1
+                            ? 'bg-white text-black font-bold border-white'
+                            : 'bg-white/5 text-white/70 border-white/10'
+                        }`}
+                      >
+                        Dual: Forçar Faixa 2
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Legendas */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Legendas</label>
+                  <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                    <button
+                      onClick={() => setSelectedSubtitleId('off')}
+                      className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
+                        selectedSubtitleId === 'off'
+                          ? 'bg-white text-black font-bold border-white'
+                          : 'bg-white/5 text-white/80 border-white/10'
+                      }`}
+                    >
+                      Desativadas (Padrão)
+                    </button>
+                    {subtitleTracks.map((tr) => (
+                      <button
+                        key={tr.id}
+                        onClick={() => setSelectedSubtitleId(tr.id)}
+                        className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
+                          selectedSubtitleId === tr.id
+                            ? 'bg-white text-black font-bold border-white'
+                            : 'bg-white/5 text-white/80 border-white/10'
+                        }`}
+                      >
+                        {tr.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="pt-1">
+                    <div className="text-[10px] text-white/50 mb-1">Tamanho da Legenda</div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          ['sm', 'Pequena'],
+                          ['md', 'Média'],
+                          ['lg', 'Grande']
+                        ] as Array<[SubtitleSize, string]>
+                      ).map(([sz, lbl]) => (
+                        <button
+                          key={sz}
+                          onClick={() => changeSubtitleSize(sz)}
+                          className={`py-1 rounded-lg text-xs border ${
+                            subtitleSize === sz
+                              ? 'bg-white text-black font-bold border-white'
+                              : 'bg-white/5 text-white/70 border-white/10'
+                          }`}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rede P2P Info */}
+                <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-white/60 font-mono">
+                  <span>Peers: <strong className="text-emerald-400">{connectedPeersCount}</strong></span>
+                  <span>Velocidade: <strong className="text-white">{formatTransferSpeed(currentTransferSpeed)}</strong></span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MODAL COMPLETO DE TRANSMISSÃO PARA TV & OUTROS DISPOSITIVOS */}
           {showCastModal && (() => {

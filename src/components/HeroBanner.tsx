@@ -67,6 +67,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
     setInWatchlist(storageService.isInWatchlist(currentMedia.id));
   }, [currentMedia?.id]);
 
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const isHorizontalSwipeRef = useRef<boolean | null>(null);
+
   if (!currentMedia) return null;
 
   const year = currentMedia.release_date ? currentMedia.release_date.slice(0, 4) : '2026';
@@ -90,6 +94,49 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
     setCurrentIndex((prev) => (prev + 1) % slides.length);
+  };
+
+  // Swipe com o dedo (celular/tablet) para navegar entre os filmes do momento
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now() };
+    isHorizontalSwipeRef.current = null;
+    setIsHovered(true); // pausa o autoplay enquanto o dedo está na tela
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    if (!start || slides.length <= 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (isHorizontalSwipeRef.current === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      isHorizontalSwipeRef.current = Math.abs(dx) > Math.abs(dy);
+    }
+    if (isHorizontalSwipeRef.current) {
+      setDragOffset(dx);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    setIsHovered(false);
+    if (!start || !isHorizontalSwipeRef.current || slides.length <= 1) {
+      setDragOffset(0);
+      return;
+    }
+    const elapsed = Math.max(1, Date.now() - start.t);
+    const velocity = Math.abs(dragOffset) / elapsed; // px/ms
+    if (Math.abs(dragOffset) > 50 || velocity > 0.45) {
+      if (dragOffset < 0) {
+        setCurrentIndex((prev) => (prev + 1) % slides.length);
+      } else {
+        setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
+      }
+    }
+    setDragOffset(0);
+    isHorizontalSwipeRef.current = null;
   };
 
   const handleToggleLike = (e: React.MouseEvent) => {
@@ -117,6 +164,11 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
       <section
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: 'pan-y' }}
         className="relative w-full h-[430px] sm:h-[520px] lg:h-[620px] rounded-[24px] sm:rounded-[32px] overflow-hidden bg-[#07090E] select-none group shadow-[0_24px_60px_-15px_rgba(15,23,42,0.35)] dark:shadow-[0_28px_70px_-15px_rgba(0,0,0,0.75)] ring-1 ring-slate-900/10 dark:ring-white/[0.1]"
       >
         {/* Imagem de Fundo com Iluminação Suave e Gradual Cinematográfica estilo Apple TV */}
@@ -129,6 +181,13 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1] }}
             className="absolute inset-0 bg-[#07090E]"
           >
+            <div
+              className="w-full h-full"
+              style={{
+                transform: dragOffset ? `translateX(${dragOffset * 0.35}px)` : undefined,
+                transition: dragOffset ? 'none' : 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)'
+              }}
+            >
             <LazyImage
               src={currentMedia.backdrop_path}
               alt={currentMedia.title}
@@ -138,6 +197,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               className="w-full h-full"
               imgClassName="object-top"
             />
+            </div>
           </motion.div>
         </AnimatePresence>
 
@@ -169,7 +229,14 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
         )}
 
         {/* Conteúdo Editorial Limpo Apple TV+ */}
-        <div className="relative h-full px-5 sm:px-9 lg:px-14 pb-6 sm:pb-10 lg:pb-12 flex flex-col justify-end z-10">
+        <div
+          className="relative h-full px-5 sm:px-9 lg:px-14 pb-6 sm:pb-10 lg:pb-12 flex flex-col justify-end z-10"
+          style={{
+            transform: dragOffset ? `translateX(${dragOffset * 0.45}px)` : undefined,
+            opacity: dragOffset ? Math.max(0.5, 1 - Math.abs(dragOffset) / 500) : 1,
+            transition: dragOffset ? 'none' : 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease'
+          }}
+        >
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
             <AnimatePresence mode="wait">
               <motion.div

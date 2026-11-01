@@ -311,6 +311,9 @@ export const api = {
     }
   },
 
+  torrentsClientCache: new Map<string, { at: number; data: TorrentSource[] }>(),
+  torrentsInflight: new Map<string, Promise<TorrentSource[]>>(),
+
   async getTorrents(
     title: string,
     options?:
@@ -335,45 +338,72 @@ export const api = {
       (typeof options === 'object' ? options?.trackerPriority : undefined) ||
       api.getSavedTrackerPriority();
 
-    const params = new URLSearchParams({ title, trackerPriority });
-    if (originalTitle) params.set('originalTitle', originalTitle);
-    if (year) params.set('year', year);
-    if (imdbId) params.set('imdbId', imdbId);
-    if (mediaType) params.set('mediaType', mediaType);
-    if (typeof season === 'number') params.set('season', season.toString());
-    if (typeof episode === 'number') params.set('episode', episode.toString());
+    const cacheKey = `${imdbId || ''}|${title}|${year || ''}|${mediaType || ''}|${season ?? ''}|${episode ?? ''}|${trackerPriority}`;
+    const cached = this.torrentsClientCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < 15 * 60 * 1000) {
+      return cached.data;
+    }
+    const inflight = this.torrentsInflight.get(cacheKey);
+    if (inflight) return inflight;
 
-    const res = await fetch(`/api/torrents?${params.toString()}`);
-    if (!res.ok) throw new Error('Falha ao obter fontes de torrent');
-    const data = await res.json();
-    const rawTorrents: any[] = data.torrents || [];
+    const fetchPromise = (async () => {
+      try {
+        const params = new URLSearchParams({ title, trackerPriority });
+        if (originalTitle) params.set('originalTitle', originalTitle);
+        if (year) params.set('year', year);
+        if (imdbId) params.set('imdbId', imdbId);
+        if (mediaType) params.set('mediaType', mediaType);
+        if (typeof season === 'number') params.set('season', season.toString());
+        if (typeof episode === 'number') params.set('episode', episode.toString());
 
-    return rawTorrents.map((t, idx) => {
-      const infoHash = extractInfoHash(t.infoHash || t.magnetUri || `stream_${idx}`);
-      const sizeFormatted = t.sizeFormatted || formatFileSize(t.sizeBytes || 2000000000);
-      const quality = t.quality || '1080p';
-      const format = t.format || (/bluray|blu-ray/i.test(t.title || '') ? 'Bluray' : 'WEB-DL');
+        const res = await fetch(`/api/torrents?${params.toString()}`);
+        if (!res.ok) throw new Error('Falha ao obter fontes de torrent');
+        const data = await res.json();
+        const rawTorrents: any[] = data.torrents || [];
 
-      return {
-        id: t.id || `torrent-${infoHash.slice(0, 8)}`,
-        title: t.title || title,
-        magnetUri:
-          t.magnetUri ||
-          `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(t.title || title)}`,
-        infoHash,
-        quality,
-        format,
-        seeds: typeof t.seeds === 'number' ? t.seeds : 50,
-        peers: typeof t.peers === 'number' ? t.peers : 12,
-        sizeBytes: t.sizeBytes || 1800000000,
-        sizeFormatted,
-        isPortugueseAudio: Boolean(t.isPortugueseAudio),
-        source: t.source || 'P2P Indexer',
-        stabilityScore: typeof t.stabilityScore === 'number' ? t.stabilityScore : t.seeds || 50,
-        trackerPriority: t.trackerPriority || trackerPriority,
-        directUrl: t.directUrl
-      };
-    });
+        const parsed = rawTorrents.map((t, idx) => {
+          const infoHash = extractInfoHash(t.infoHash || t.magnetUri || `stream_${idx}`);
+          const sizeFormatted = t.sizeFormatted || formatFileSize(t.sizeBytes || 2000000000);
+          const quality = t.quality || '1080p';
+          const format = t.format || (/bluray|blu-ray/i.test(t.title || '') ? 'Bluray' : 'WEB-DL');
+
+          return {
+            id: t.id || `torrent-${infoHash.slice(0, 8)}`,
+            title: t.title || title,
+            magnetUri:
+              t.magnetUri ||
+              `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(t.title || title)}`,
+            infoHash,
+            quality,
+            format,
+            seeds: typeof t.seeds === 'number' ? t.seeds : 50,
+            peers: typeof t.peers === 'number' ? t.peers : 12,
+            sizeBytes: t.sizeBytes || 1800000000,
+            sizeFormatted,
+            isPortugueseAudio: Boolean(t.isPortugueseAudio),
+            source: t.source || 'P2P Indexer',
+            stabilityScore: typeof t.stabilityScore === 'number' ? t.stabilityScore : t.seeds || 50,
+            trackerPriority: t.trackerPriority || trackerPriority,
+            directUrl: t.directUrl,
+            fileIdx: typeof t.fileIdx === 'number' ? t.fileIdx : undefined
+          };
+        });
+
+        if (parsed.length > 0) {
+          if (this.torrentsClientCache.size >= 300) {
+            const first = this.torrentsClientCache.keys().next().value;
+            if (first !== undefined) this.torrentsClientCache.delete(first);
+          }
+          this.torrentsClientCache.set(cacheKey, { at: Date.now(), data: parsed });
+        }
+        return parsed;
+      } finally {
+        this.torrentsInflight.delete(cacheKey);
+      }
+    })();
+
+    this.torrentsInflight.set(cacheKey, fetchPromise);
+    return fetchPromise;
   },
 
   async getTorrentStats(magnetUri: string): Promise<TorrentLiveStats | null> {

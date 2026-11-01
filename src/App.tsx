@@ -289,6 +289,8 @@ export default function App() {
           ? historyMatch.currentTime
           : 0;
 
+      setSelectedMedia(null);
+      setIsPlayerMini(false);
       setActivePlayerState({
         media,
         torrent,
@@ -325,6 +327,7 @@ export default function App() {
         : 0;
 
     setSelectedMedia(null);
+    setIsPlayerMini(false);
     setActivePlayerState({
       media,
       torrent,
@@ -726,6 +729,7 @@ export default function App() {
 
       {activePlayerState && (
         <VideoPlayer
+          key={`${activePlayerState.media.id}-${activePlayerState.episode?.seasonNumber || 0}-${activePlayerState.episode?.episodeNumber || 0}-${activePlayerState.torrent.id || ''}`}
           media={activePlayerState.media}
           torrent={activePlayerState.torrent}
           availableTorrents={activePlayerState.availableTorrents}
