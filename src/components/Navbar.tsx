@@ -1,11 +1,11 @@
 /**
- * Popoca Streaming - Top Navigation Bar
- * Barra de navegação Liquid Glass estilo Apple TV com busca global em tempo real,
- * sugestões instantâneas via TMDB, alternador de tema (Grafite / Branco) e atalho para Perfil Letterboxd.
+ * Popoca Streaming - Apple TV+ Floating Liquid Glass Navigation Bar
+ * Cápsula flutuante translúcida responsiva em todas as janelas (mobile, janela compacta e widescreen),
+ * com navegação em pílulas estilo Apple TV+, busca instantânea limpa e alternador de tema.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Clapperboard, X, Sun, Moon, User, Film, Star, ListPlus, Compass } from 'lucide-react';
+import { Search, Clapperboard, X, Sun, Moon, Film, Star } from 'lucide-react';
 import { MediaItem } from '../types/index.ts';
 import { api } from '../services/api.ts';
 import { storageService } from '../services/storage.ts';
@@ -17,6 +17,15 @@ interface NavbarProps {
   onSelectCategory: (category: string, query?: string) => void;
   onSelectMedia: (media: MediaItem) => void;
 }
+
+const NAV_TABS = [
+  { id: 'trending', label: 'Início' },
+  { id: 'movies', label: 'Filmes' },
+  { id: 'tv', label: 'Séries' },
+  { id: 'anime', label: 'Animes' },
+  { id: 'letterboxd', label: 'Letterboxd' },
+  { id: 'library', label: 'Explorar' }
+];
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentCategory,
@@ -33,8 +42,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const profile = storageService.getProfile();
+  const isLight = theme === 'light';
 
-  // Busca preditiva em tempo real enquanto o usuário digita
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSuggestions([]);
@@ -49,8 +58,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         const results = await api.getSuggestions(searchQuery);
         setSuggestions(results);
         setShowDropdown(true);
-      } catch (e) {
-        console.warn('Erro ao obter sugestões:', e);
+      } catch {
+        // Silencioso
       } finally {
         setIsSearching(false);
       }
@@ -59,7 +68,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fechar dropdown ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
@@ -75,11 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     setSearchQuery('');
     try {
       const details = await api.getDetails(suggestion.id, suggestion.media_type);
-      if (details) {
-        onSelectMedia(details);
-      } else {
-        onSelectMedia(suggestion);
-      }
+      onSelectMedia(details || suggestion);
     } catch {
       onSelectMedia(suggestion);
     }
@@ -92,128 +96,91 @@ export const Navbar: React.FC<NavbarProps> = ({
     onSelectCategory('library', searchQuery.trim());
   };
 
-  const isLight = theme === 'light';
-
   return (
-    <header className="sticky top-0 z-40 w-full glass-panel border-b border-white/[0.08] backdrop-blur-3xl transition-colors duration-300">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 sm:gap-4 md:gap-8">
-        
-        {/* Zona 1: Marca Popoca Minimalista (Sem Vermelho) */}
+    <header className="sticky top-0 z-40 w-full px-2.5 sm:px-5 lg:px-8 pt-2.5 sm:pt-3 pb-1.5">
+      <div className="max-w-[1440px] mx-auto h-13 sm:h-14 px-2.5 sm:px-4 rounded-2xl sm:rounded-full glass-capsule flex items-center justify-between gap-2 sm:gap-3 transition-all duration-300">
+        {/* Marca Apple TV Minimalista */}
         <button
+          type="button"
           onClick={() => onSelectCategory('trending')}
-          className="flex items-center gap-1.5 sm:gap-2 text-left group shrink-0 focus-visible:outline-none"
+          className="flex items-center gap-2 text-left group shrink-0 pl-0.5 sm:pl-1 focus-visible:outline-none cursor-pointer"
         >
-          <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-300 shadow-md ${
-            isLight
-              ? 'bg-slate-900 text-white shadow-slate-900/10'
-              : 'bg-white/[0.08] text-white border border-white/10 group-hover:bg-white/15'
-          }`}>
-            <Clapperboard className="w-4 h-4 sm:w-5 sm:h-5" />
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
+              isLight
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'bg-white text-black shadow-sm group-hover:scale-105'
+            }`}
+          >
+            <Clapperboard className="w-4 h-4" />
           </div>
-          <span className={`hidden sm:inline text-base sm:text-xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
-            POPOCA
+          <span
+            className={`text-sm sm:text-base font-extrabold tracking-tight ${
+              isLight ? 'text-slate-900' : 'text-white'
+            }`}
+          >
+            Popoca
           </span>
         </button>
 
-        {/* Zona 2: Links de Navegação Desktop */}
-        <nav className={`hidden lg:flex items-center gap-6 text-sm font-medium ${isLight ? 'text-slate-600' : 'text-white/70'}`}>
-          <button
-            onClick={() => onSelectCategory('trending')}
-            className={`whitespace-nowrap transition-colors py-1 ${
-              currentCategory === 'trending'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            Início
-          </button>
-          <button
-            onClick={() => onSelectCategory('movies')}
-            className={`whitespace-nowrap transition-colors py-1 ${
-              currentCategory === 'movies'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            Filmes
-          </button>
-          <button
-            onClick={() => onSelectCategory('tv')}
-            className={`whitespace-nowrap transition-colors py-1 ${
-              currentCategory === 'tv'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            Séries
-          </button>
-          <button
-            onClick={() => onSelectCategory('anime')}
-            className={`whitespace-nowrap transition-colors py-1 ${
-              currentCategory === 'anime'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            Animes
-          </button>
-          <button
-            onClick={() => onSelectCategory('library')}
-            className={`whitespace-nowrap transition-colors py-1 flex items-center gap-1.5 ${
-              currentCategory === 'library'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            <Compass className="w-4 h-4" />
-            Explorar Tudo
-          </button>
-          <button
-            onClick={() => onSelectCategory('lists')}
-            className={`whitespace-nowrap transition-colors py-1 flex items-center gap-1.5 ${
-              currentCategory === 'lists'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            <ListPlus className="w-4 h-4" />
-            Minhas Listas
-          </button>
-          <button
-            onClick={() => onSelectCategory('profile')}
-            className={`whitespace-nowrap transition-colors py-1 flex items-center gap-1.5 ${
-              currentCategory === 'profile'
-                ? isLight ? 'text-slate-900 font-bold border-b-2 border-slate-900' : 'text-white font-bold border-b-2 border-white'
-                : isLight ? 'hover:text-slate-900' : 'hover:text-white'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            Perfil & Letterboxd
-          </button>
+        {/* Cápsula Central de Navegação Estilo Apple TV+ (visível a partir de 768px) */}
+        <nav
+          className={`hidden md:flex items-center gap-1 p-1 rounded-full ${
+            isLight
+              ? 'bg-slate-900/[0.05] border border-slate-900/[0.06]'
+              : 'bg-white/[0.05] border border-white/[0.07]'
+          }`}
+        >
+          {NAV_TABS.map((tab) => {
+            const isActive = currentCategory === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onSelectCategory(tab.id)}
+                className={`px-3.5 lg:px-4 py-1.5 rounded-full text-xs lg:text-[13px] font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
+                  isActive
+                    ? isLight
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white text-black shadow-sm'
+                    : isLight
+                    ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-900/[0.05]'
+                    : 'text-white/70 hover:text-white hover:bg-white/[0.08]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </nav>
 
-        {/* Zona 3: Barra de Busca Global e Controles */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 flex-1 min-w-0 justify-end max-w-full sm:max-w-md md:max-w-lg">
-          
-          {/* Campo de Busca Global em Tempo Real */}
-          <div ref={searchContainerRef} className="relative flex-1 min-w-0 max-w-full sm:max-w-[340px]">
+        {/* Controles à Direita: Busca Compacta, Tema e Perfil */}
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 md:flex-initial justify-end">
+          <div
+            ref={searchContainerRef}
+            className="relative flex-1 md:flex-initial min-w-0 max-w-[190px] sm:max-w-[230px] lg:w-56"
+          >
             <form onSubmit={handleSubmitSearch} className="relative flex items-center w-full">
               <input
                 ref={searchInputRef}
                 type="text"
-                placeholder="Buscar..."
+                placeholder="Buscar"
                 value={searchQuery}
                 onFocus={() => {
                   if (suggestions.length > 0) setShowDropdown(true);
                 }}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className={`w-full text-xs sm:text-sm pl-8 sm:pl-9 pr-7 sm:pr-8 py-1.5 sm:py-2 rounded-xl transition-all focus:outline-none ${
+                className={`w-full text-xs sm:text-[13px] pl-8 pr-7 py-1.5 rounded-full transition-all focus:outline-none ${
                   isLight
-                    ? 'bg-white/70 text-slate-900 placeholder-slate-400 border border-slate-200/80 focus:bg-white focus:ring-2 focus:ring-slate-900/10 shadow-sm'
-                    : 'bg-white/[0.05] text-white placeholder-white/40 border border-white/[0.08] focus:bg-white/[0.09] focus:border-white/20'
+                    ? 'bg-slate-900/[0.06] text-slate-900 placeholder-slate-500 border border-slate-900/[0.08] focus:bg-white focus:border-slate-900/25 focus:ring-2 focus:ring-slate-900/10'
+                    : 'bg-white/[0.07] text-white placeholder-white/45 border border-white/[0.09] focus:bg-white/[0.12] focus:border-white/25'
                 }`}
               />
-              <Search className={`w-3.5 h-3.5 sm:w-4 sm:h-4 absolute left-2.5 sm:left-3 pointer-events-none ${isLight ? 'text-slate-400' : 'text-white/40'}`} />
+              <Search
+                className={`w-3.5 h-3.5 absolute left-2.5 pointer-events-none ${
+                  isLight ? 'text-slate-500' : 'text-white/45'
+                }`}
+              />
               {searchQuery && (
                 <button
                   type="button"
@@ -222,24 +189,31 @@ export const Navbar: React.FC<NavbarProps> = ({
                     setSuggestions([]);
                     setShowDropdown(false);
                   }}
-                  className={`absolute right-2 p-0.5 rounded-full ${isLight ? 'text-slate-400 hover:text-slate-600' : 'text-white/40 hover:text-white'}`}
+                  className={`absolute right-2 p-0.5 rounded-full ${
+                    isLight ? 'text-slate-500 hover:text-slate-900' : 'text-white/45 hover:text-white'
+                  }`}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </form>
 
-            {/* Dropdown Flutuante de Sugestões em Tempo Real */}
             {showDropdown && (
-              <div className={`absolute right-0 top-11 sm:top-12 w-72 sm:w-96 glass-dropdown rounded-2xl shadow-2xl p-2 z-50 border ${
-                isLight ? 'border-slate-200' : 'border-white/10'
-              }`}>
+              <div
+                className={`absolute right-0 top-11 w-[calc(100vw-24px)] max-w-80 sm:w-88 glass-dropdown rounded-2xl p-2 z-50 border ${
+                  isLight ? 'border-slate-200/90' : 'border-white/12'
+                }`}
+              >
                 {isSearching ? (
-                  <div className={`py-4 text-center text-xs ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
-                    Pesquisando...
+                  <div className={`py-4 text-center text-xs ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
+                    Buscando...
                   </div>
                 ) : suggestions.length > 0 ? (
-                  <div className="flex flex-col divide-y divide-white/[0.04] max-h-80 overflow-y-auto">
+                  <div
+                    className={`flex flex-col divide-y max-h-80 overflow-y-auto ${
+                      isLight ? 'divide-slate-200/70' : 'divide-white/[0.05]'
+                    }`}
+                  >
                     {suggestions.map((item) => (
                       <button
                         key={item.id}
@@ -249,7 +223,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           isLight ? 'hover:bg-slate-100' : 'hover:bg-white/[0.08]'
                         }`}
                       >
-                        <div className="w-9 h-12 rounded-lg bg-neutral-900 shrink-0 overflow-hidden border border-white/10">
+                        <div className="w-9 h-12 rounded-lg bg-slate-900 shrink-0 overflow-hidden border border-black/10 dark:border-white/10">
                           {item.poster_path ? (
                             <img
                               src={item.poster_path}
@@ -264,19 +238,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h4 className={`text-xs font-semibold truncate ${
-                            isLight ? 'text-slate-900 group-hover:text-black' : 'text-white group-hover:text-white/90'
-                          }`}>
+                          <h4
+                            className={`text-xs font-bold truncate ${
+                              isLight ? 'text-slate-900' : 'text-white'
+                            }`}
+                          >
                             {item.title}
                           </h4>
-                          <div className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] mt-0.5 ${isLight ? 'text-slate-500' : 'text-white/50'}`}>
+                          <div
+                            className={`flex items-center gap-1.5 text-[11px] mt-0.5 ${
+                              isLight ? 'text-slate-500' : 'text-white/50'
+                            }`}
+                          >
                             {item.year && <span>{item.year}</span>}
                             {item.year && <span aria-hidden="true">·</span>}
-                            <span className="capitalize">{item.media_type === 'tv' ? 'Série' : (item.media_type === 'anime' ? 'Anime' : 'Filme')}</span>
+                            <span>
+                              {item.media_type === 'tv' ? 'Série' : item.media_type === 'anime' ? 'Anime' : 'Filme'}
+                            </span>
                             {item.vote_average > 0 && (
                               <>
                                 <span aria-hidden="true">·</span>
-                                <span className="flex items-center gap-0.5 text-amber-400 font-mono">
+                                <span className="flex items-center gap-0.5 text-amber-500 dark:text-amber-400 font-mono font-semibold">
                                   <Star className="w-2.5 h-2.5 fill-current" />
                                   {item.vote_average.toFixed(1)}
                                 </span>
@@ -293,14 +275,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setShowDropdown(false);
                         onSelectCategory('library', searchQuery.trim());
                       }}
-                      className="p-2 text-center text-xs font-bold text-white/70 hover:text-white pt-2.5"
+                      className={`p-2 text-center text-xs font-bold pt-2.5 ${
+                        isLight ? 'text-slate-800 hover:text-black' : 'text-white/80 hover:text-white'
+                      }`}
                     >
-                      Ver todos os resultados na Biblioteca →
+                      Ver todos os resultados →
                     </button>
                   </div>
                 ) : (
-                  <div className={`py-4 text-center text-xs ${isLight ? 'text-slate-400' : 'text-white/40'}`}>
-                    Nenhum título encontrado para "{searchQuery}"
+                  <div className={`py-4 text-center text-xs ${isLight ? 'text-slate-500' : 'text-white/45'}`}>
+                    Nenhum resultado para "{searchQuery}"
                   </div>
                 )}
               </div>
@@ -311,49 +295,40 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={onToggleTheme}
-            className={`p-2 rounded-xl transition-colors glass-subtle shrink-0 ${
-              isLight ? 'text-slate-700 hover:text-black hover:bg-slate-200/50' : 'text-white/70 hover:text-white hover:bg-white/10'
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+              isLight
+                ? 'bg-slate-900/[0.06] text-slate-800 hover:bg-slate-900/[0.12]'
+                : 'bg-white/[0.08] text-white/80 hover:text-white hover:bg-white/[0.15]'
             }`}
-            title={isLight ? 'Alternar para Modo Grafite Escuro' : 'Alternar para Modo Branco Minimalista'}
-            aria-label="Alternar tema de cores"
+            title={isLight ? 'Modo Escuro' : 'Modo Claro'}
+            aria-label="Alternar tema"
           >
             {isLight ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           </button>
 
-          {/* Indicador de Nuvem / Sincronização */}
+          {/* Avatar / Perfil */}
           <button
             type="button"
             onClick={() => onSelectCategory('profile')}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all shrink-0"
-            title="Sincronização em Nuvem ativa entre dispositivos"
-          >
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-            </span>
-            <span className="hidden sm:inline">Nuvem</span>
-          </button>
-
-          {/* Atalho de Perfil */}
-          <button
-            type="button"
-            onClick={() => onSelectCategory('profile')}
-            className={`flex items-center gap-2 p-1 rounded-xl transition-all shrink-0 ${
-              currentCategory === 'profile'
-                ? isLight ? 'ring-2 ring-slate-900' : 'ring-2 ring-white/60'
-                : 'hover:opacity-80'
+            className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-all shrink-0 overflow-hidden cursor-pointer ${
+              currentCategory === 'profile' || currentCategory === 'lists'
+                ? isLight
+                  ? 'ring-2 ring-slate-900 bg-slate-900 text-white'
+                  : 'ring-2 ring-white bg-white text-black'
+                : isLight
+                ? 'bg-slate-900 text-white hover:opacity-90'
+                : 'bg-white/15 text-white hover:bg-white/25'
             }`}
-            title="Meu Perfil & Letterboxd"
+            title="Perfil"
+            aria-label="Perfil"
           >
-            <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
-              isLight ? 'bg-slate-200 text-slate-800' : 'bg-white/10 text-white'
-            }`}>
-              {profile.username ? profile.username[0].toUpperCase() : 'P'}
-            </div>
+            {profile.avatarUrl ? (
+              <img src={profile.avatarUrl} alt={profile.username} className="w-full h-full object-cover" />
+            ) : (
+              <span>{profile.username ? profile.username[0].toUpperCase() : 'P'}</span>
+            )}
           </button>
-
         </div>
-
       </div>
     </header>
   );

@@ -1,10 +1,10 @@
 /**
- * Popoca Streaming - Mobile Bottom Navigation
- * Barra ergonômica inferior para smartphones com feedback de toque instantâneo (zero vermelho).
+ * Popoca Streaming - Floating Apple Liquid Glass Mobile Dock
+ * Barra flutuante em cápsula translúcida para telas compactas e smartphones (< 768px).
  */
 
 import React from 'react';
-import { Home, Film, Tv, Compass, User } from 'lucide-react';
+import { Home, Film, Tv, Sparkles, Compass, Star } from 'lucide-react';
 
 interface BottomNavProps {
   currentCategory: string;
@@ -21,56 +21,48 @@ export const BottomNav: React.FC<BottomNavProps> = ({
     { id: 'trending', label: 'Início', icon: Home },
     { id: 'movies', label: 'Filmes', icon: Film },
     { id: 'tv', label: 'Séries', icon: Tv },
-    { id: 'library', label: 'Explorar', icon: Compass },
-    { id: 'profile', label: 'Perfil', icon: User }
+    { id: 'anime', label: 'Animes', icon: Sparkles },
+    { id: 'letterboxd', label: 'Social', icon: Star },
+    { id: 'library', label: 'Explorar', icon: Compass }
   ];
 
   const isLight = theme === 'light';
 
   return (
-    <nav
+    <div
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)' }}
-      className={`md:hidden fixed bottom-0 left-0 right-0 z-40 glass-dropdown border-t transition-colors ${
-        isLight ? 'border-slate-200/80 bg-white/85 shadow-lg' : 'border-white/[0.08] bg-[#0E1016]/95'
-      }`}
+      className="md:hidden fixed bottom-2 left-2 right-2 z-40 pointer-events-none flex justify-center"
     >
-      <div className="grid grid-cols-5 items-center h-16 max-w-md mx-auto px-1">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = currentCategory === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => onSelectCategory(tab.id)}
-              className="flex flex-col items-center justify-center min-h-[48px] py-1 transition-transform active:scale-90"
-              aria-label={tab.label}
-            >
-              <div
-                className={`p-1.5 rounded-xl transition-colors ${
+      <nav className="pointer-events-auto w-full max-w-lg glass-capsule rounded-full p-1.5 shadow-2xl">
+        <div className="grid grid-cols-6 items-center">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = currentCategory === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onSelectCategory(tab.id)}
+                className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-full transition-all active:scale-95 ${
                   isActive
                     ? isLight
-                      ? 'bg-slate-900 text-white shadow-md'
-                      : 'bg-white text-black shadow-md'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white text-black shadow-sm'
                     : isLight
-                      ? 'text-slate-400 hover:text-black'
-                      : 'text-white/50 hover:text-white'
+                    ? 'text-slate-600 hover:text-slate-900'
+                    : 'text-white/60 hover:text-white'
                 }`}
+                aria-label={tab.label}
               >
-                <Icon className="w-5 h-5" />
-              </div>
-              <span
-                className={`text-[10px] font-medium tracking-tight mt-1 ${
-                  isActive
-                    ? isLight ? 'text-slate-900 font-bold' : 'text-white font-bold'
-                    : isLight ? 'text-slate-400' : 'text-white/40'
-                }`}
-              >
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
+                <Icon className="w-4 h-4" />
+                <span className="text-[10px] font-semibold tracking-tight mt-0.5 leading-none">
+                  {tab.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </div>
   );
 };

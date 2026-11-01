@@ -54,8 +54,272 @@
   {
     "userId": "guilhermefonseca732_gmail_com",
     "email": "guilhermefonseca732@gmail.com",
-    "lastUpdated": 1793481744908,
+    "lastUpdated": 1793507672010,
     "watchHistory": [
+      {
+        "id": 94605,
+        "title": "Arcane",
+        "poster_path": "https://images.metahub.space/poster/medium/tt11126994/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt11126994/img",
+        "currentTime": 662.691244,
+        "duration": 2520,
+        "progressPercent": 26,
+        "lastWatched": 1793507670003,
+        "mediaType": "anime",
+        "magnetUri": "magnet:?xt=urn:btih:1ed4ae972fd74c88f3cdd92f289112789e2ee77e&dn=Arcane.League.of.Legends.S01E01-02-03.720p.WEB-DL.DUAL.5.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz",
+        "episodeNumber": 1,
+        "seasonNumber": 1,
+        "episodeTitle": "Ep. 1 - Entrando na Brincadeira"
+      },
+      {
+        "id": 687163,
+        "title": "Devoradores de Estrelas",
+        "poster_path": "https://images.metahub.space/poster/medium/tt12042730/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt12042730/img",
+        "currentTime": 686.898963,
+        "duration": 9360,
+        "progressPercent": 7,
+        "lastWatched": 1793504949190,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:f824bfdf04e68b6a4eb8793e0a3b15af9ee27e07&dn=Devoradores%20de%20Estrelas%202026%20WEB-DL%201080p%20x264%20IMAX%20DUAL%205.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 13,
+        "title": "Forrest Gump: O Contador de Histórias",
+        "poster_path": "https://images.metahub.space/poster/medium/tt0109830/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt0109830/img",
+        "currentTime": 43.104856,
+        "duration": 8520,
+        "progressPercent": 1,
+        "lastWatched": 1793504379959,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:ca2835dafd152b9880cc21bd9375d7a7db8d9518&dn=Forrest%20Gump%3A%20O%20Contador%20De%20Historias%20(1994)%20720p%20Dublado%20Pt%20Br&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 1314896,
+        "title": "O Diabo Veste Prada 2",
+        "poster_path": "https://images.metahub.space/poster/medium/tt33612209/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt33612209/img",
+        "currentTime": 218.628519,
+        "duration": 7216.864,
+        "progressPercent": 3,
+        "lastWatched": 1793504193715,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:b4377cc6a417fb1eaba404118c8f031a12027653&dn=The%20Devil%20Wears%20Prada%202%202026%201080p%20WEBRip&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 2359704,
+        "title": "JoJo's Bizarre Adventure",
+        "poster_path": "https://m.media-amazon.com/images/M/MV5BMzIyNzY4NTMtNmVhYS00OWFhLTkwMWMtOGFkNTdmNWU2ZDdiXkEyXkFqcGc@._V1_.jpg",
+        "backdrop_path": "https://images.metahub.space/background/large/tt2359704/img",
+        "currentTime": 43.584611,
+        "duration": 2880,
+        "progressPercent": 2,
+        "lastWatched": 1793503826167,
+        "mediaType": "tv",
+        "magnetUri": "magnet:?xt=urn:btih:27ad9ea5e3eeb7d33ea5d0dc149e1a564c31a6a1&dn=%5Bhchcsen%5D%20JoJo's%20Bizarre%20Adventure%20Part%201%20Phantom%20Blood%20%26%20Part%202%20Battle%20Tendency%20(1080p)%20(BDRip)%20(Dual%20Audio)&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz",
+        "episodeNumber": 1,
+        "seasonNumber": 1,
+        "episodeTitle": "Dio the Invader"
+      },
+      {
+        "id": 2584384,
+        "title": "Jojo Rabbit",
+        "poster_path": "https://m.media-amazon.com/images/M/MV5BYmFmNmUyMjYtZTFjNS00OWQyLThhZmMtMGZkYTQ3YjY0ZDQ1XkEyXkFqcGc@._V1_.jpg",
+        "backdrop_path": "https://images.metahub.space/background/large/tt2584384/img",
+        "currentTime": 17.535488,
+        "duration": 6480,
+        "progressPercent": 0,
+        "lastWatched": 1793503717687,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:db3ff40dce974c5b90895b51c07c35d3db295fe0&dn=Jojo%20Rabbit%202020%20%5B1080p%5D%20%5BDUAL%5D&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 936075,
+        "title": "Michael",
+        "poster_path": "https://images.metahub.space/poster/medium/tt11378946/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt11378946/img",
+        "currentTime": 1424.619459,
+        "duration": 7620,
+        "progressPercent": 19,
+        "lastWatched": 1793503581929,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:8d45dc68ce4d3e085f3580be2b962ed8543cbd00&dn=Michael.2026.1080p.WEB-DL.x264.DUAL.5.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 8814476,
+        "title": "Supergirl",
+        "poster_path": "https://m.media-amazon.com/images/M/MV5BNWQzNjU2MDMtNzgxOS00YzcxLWE2YjYtMzY3OTAyOGJlMmQ5XkEyXkFqcGc@._V1_.jpg",
+        "backdrop_path": "https://images.metahub.space/background/large/tt8814476/img",
+        "currentTime": 67.631922,
+        "duration": 6900,
+        "progressPercent": 1,
+        "lastWatched": 1793502723363,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:9a574e8da6dbb5ab9b9dd4b490b4608cd546c6de&dn=Supergirl%202026%20WEB-DL%201080p%20x264%20DUAL%205.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 939243,
+        "title": "Sonic 3: O Filme",
+        "poster_path": "https://images.metahub.space/poster/medium/tt18259086/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt18259086/img",
+        "currentTime": 2283.013364,
+        "duration": 5880,
+        "progressPercent": 39,
+        "lastWatched": 1793502429704,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:7b3b1a9778ea44ef45341f000656e0905cc79a92&dn=Super%20Mario%20Galaxy%20-%20O%20Filme%202026%20WEB-DL%201080p%20x264%20DUAL%205.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 1226863,
+        "title": "Super Mario Galaxy: O Filme",
+        "poster_path": "https://images.metahub.space/poster/medium/tt28650488/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt28650488/img",
+        "currentTime": 2273.250043,
+        "duration": 5880,
+        "progressPercent": 39,
+        "lastWatched": 1793502420028,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:7b3b1a9778ea44ef45341f000656e0905cc79a92&dn=Super%20Mario%20Galaxy%20-%20O%20Filme%202026%20WEB-DL%201080p%20x264%20DUAL%205.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 27419420,
+        "title": "Street Fighter",
+        "poster_path": "https://m.media-amazon.com/images/M/MV5BYjhlN2EyNGUtY2U4YS00ZTQ3LTg0NTgtNGIxZmVhMDlmMjIyXkEyXkFqcGc@._V1_.jpg",
+        "backdrop_path": "https://images.metahub.space/background/large/tt27419420/img",
+        "currentTime": 77.608777,
+        "duration": 7140,
+        "progressPercent": 1,
+        "lastWatched": 1793502350605,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:740c14a957280a9d5b4cd6d790ef91067d39f062&dn=Street.Fighter.2026.1080p.CAMRip.Dublado.V.2.mkv&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 1084244,
+        "title": "Toy Story 5",
+        "poster_path": "https://images.metahub.space/poster/medium/tt29355505/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt29355505/img",
+        "currentTime": 1925.5,
+        "duration": 6120,
+        "progressPercent": 31,
+        "lastWatched": 1793502239594,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:a45e83b6aa195612c2c45f20b47ed915438b7980&dn=Toy%20Story%205%202026%20720p%20AMZN%20WEB-DL%20DDP5%201%20H%20264-KyoGo&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 969681,
+        "title": "Homem-Aranha: Um Novo Dia",
+        "poster_path": "https://images.metahub.space/poster/medium/tt22084616/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt22084616/img",
+        "currentTime": 2896.817276,
+        "duration": 8700,
+        "progressPercent": 33,
+        "lastWatched": 1793502130529,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:00cc9081feed68eef9a8893368f9e198f0204483&dn=Homem-Aranha%20-%20Um%20Novo%20Dia%202026%20WEB-DL%201080p%20x264%20DUAL%205.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 27543632,
+        "title": "The Housemaid",
+        "poster_path": "https://images.metahub.space/poster/small/tt27543632/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt27543632/img",
+        "currentTime": 377,
+        "duration": 6900,
+        "progressPercent": 5,
+        "lastWatched": 1793501810982,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:28b099392ff0b198a4a8e0121c3f1356532f36d4&dn=The%20Housemaid%202025%20720p%20BluRay%20x264%20DuaL-TURKO&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 37854,
+        "title": "One Piece",
+        "poster_path": "https://images.metahub.space/poster/medium/tt0388629/img",
+        "backdrop_path": "https://images.metahub.space/background/large/tt0388629/img",
+        "currentTime": 0,
+        "duration": 1440,
+        "progressPercent": 0,
+        "lastWatched": 1793500494243,
+        "mediaType": "anime",
+        "magnetUri": "magnet:?xt=urn:btih:3057ce95de414338967111de21dfd7454238080e&dn=%5BAnime%20Time%5D%20One%20Piece%20-%20Season%201%20-%20East%20Blue%20(Fixed)%20%5B1080p%5D%5BHEVC%2010bit%20x265%5D%5BAAC%5D%20%5BDual%20Audio%5D%5BEng%20Sub%5D&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz",
+        "episodeNumber": 2,
+        "seasonNumber": 1,
+        "episodeTitle": "Enter the Great Swordsman! Pirate Hunter Roronoa Zoro!"
+      },
+      {
+        "id": 37287335,
+        "title": "Obsessão",
+        "poster_path": "https://images.metahub.space/poster/small/tt37287335/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt37287335/img",
+        "currentTime": 0,
+        "duration": 6900,
+        "progressPercent": 0,
+        "lastWatched": 1793497131568,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:b417859c1a5c3f539b042fb51a44787e52edb6c0&dn=Obsess%C3%A3o.2026.1080p.WEB-DL.x264.DUAL.5.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=wss%3A%2F%2Ftracker.openwebtorrent.com&tr=wss%3A%2F%2Ftracker.btorrent.xyz"
+      },
+      {
+        "id": 1396,
+        "title": "Breaking Bad: A Química do Mal",
+        "poster_path": "https://images.metahub.space/poster/medium/tt0903747/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt0903747/img",
+        "currentTime": 0,
+        "duration": 2880,
+        "progressPercent": 0,
+        "lastWatched": 1793496615229,
+        "mediaType": "tv",
+        "magnetUri": "",
+        "episodeNumber": 7,
+        "seasonNumber": 1,
+        "episodeTitle": "Ep. 7 - Um Acordo Sem Violência"
+      },
+      {
+        "id": 550,
+        "title": "Clube da Luta",
+        "poster_path": "https://images.metahub.space/poster/medium/tt0137523/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt0137523/img",
+        "currentTime": 0,
+        "duration": 8340,
+        "progressPercent": 0,
+        "lastWatched": 1793496334305,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:a086ce4afabbd8ab949662e30134a49e22d1f0c7&dn=Fight%20Club%20(1999)%201080p%20BrRip%20x264%20-%20YIFY&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2920%2Fannounce&tr=http%3A%2F%2Fp4p.arenabg.com%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.vc%3A6969%2Fannounce"
+      },
+      {
+        "id": 889737,
+        "title": "Coringa: Del?rio a Dois",
+        "poster_path": "https://images.metahub.space/poster/medium/tt11315808/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt11315808/img",
+        "currentTime": 0,
+        "duration": 8280,
+        "progressPercent": 0,
+        "lastWatched": 1793496291724,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:0b7b2c7b572150732d04fd22e0658ab21c090899&dn=Coringa.Delirio.a.Dois.2024.1080p.FULL.HD.WEB-DL.DUAL.5.1&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce"
+      },
+      {
+        "id": 1022789,
+        "title": "Divertida Mente 2",
+        "poster_path": "https://images.metahub.space/poster/medium/tt22022452/img",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt22022452/img",
+        "currentTime": 0,
+        "duration": 5760,
+        "progressPercent": 0,
+        "lastWatched": 1793494912595,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:7b3e430350a5c0eebd08de78b8d5592639feb444&dn=Inside.Out.2.2024.1080p.WEBRip.Dublado.mkv&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce"
+      },
+      {
+        "id": 382932,
+        "title": "Ratatouille",
+        "poster_path": "https://m.media-amazon.com/images/M/MV5BMTMzODU0NTkxMF5BMl5BanBnXkFtZTcwMjQ4MzMzMw@@._V1_SX250.jpg",
+        "backdrop_path": "https://images.metahub.space/background/medium/tt0382932/img",
+        "currentTime": 0,
+        "duration": 6900,
+        "progressPercent": 0,
+        "lastWatched": 1793494360047,
+        "mediaType": "movie",
+        "magnetUri": "magnet:?xt=urn:btih:c9aa102bd55b91bc835ea39d9dfa2115569ad99d&dn=Ratatouille%20(2007)%20%5B2160p%5D%20UHD%20%5BBR%5D%20HDR%20AV1%20TrueHD.7.1%2BAtmos&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.bt4g.com%3A2095%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce"
+      },
       {
         "id": 76479,
         "title": "The Boys",
@@ -87,18 +351,6 @@
         "episodeTitle": "Ep. 1 - O Desaparecimento de Will Byers"
       },
       {
-        "id": 382932,
-        "title": "Ratatouille",
-        "poster_path": "https://m.media-amazon.com/images/M/MV5BMTMzODU0NTkxMF5BMl5BanBnXkFtZTcwMjQ4MzMzMw@@._V1_SX250.jpg",
-        "backdrop_path": "https://images.metahub.space/background/medium/tt0382932/img",
-        "currentTime": 0,
-        "duration": 6900,
-        "progressPercent": 0,
-        "lastWatched": 1793481535774,
-        "mediaType": "movie",
-        "magnetUri": "magnet:?xt=urn:btih:53974f3ac37c5ca601a3ba7370f3223ae7f99dfe&dn=Ratatouille%20(2007)%20720p%20BRRip%20x264%20Dublado%20pt-BR%20%2F%20Brazilian%20Pt&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2920%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.vc%3A6969%2Fannounce"
-      },
-      {
         "id": 693134,
         "title": "Duna: Parte 2",
         "poster_path": "https://images.metahub.space/poster/medium/tt15239678/img",
@@ -109,33 +361,6 @@
         "lastWatched": 1793481425120,
         "mediaType": "movie",
         "magnetUri": "magnet:?xt=urn:btih:2d5ff0915bd4bc99d4b957ddd86b78c021677089&dn=Duna%20-%20Parte%20Dois%202024%201080p%20WEB-DL%20DUAL%205.1&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2920%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.vc%3A6969%2Fannounce"
-      },
-      {
-        "id": 27543632,
-        "title": "The Housemaid",
-        "poster_path": "https://images.metahub.space/poster/small/tt27543632/img",
-        "backdrop_path": "https://images.metahub.space/background/medium/tt27543632/img",
-        "currentTime": 0,
-        "duration": 6900,
-        "progressPercent": 0,
-        "lastWatched": 1793481327238,
-        "mediaType": "movie",
-        "magnetUri": "magnet:?xt=urn:btih:ff9b9024d88c50f30b03f76e16172a180a450daa&dn=A.Empregada.2025.1080p.WEB-DL.DUAL.5.1&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2920%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.vc%3A6969%2Fannounce"
-      },
-      {
-        "id": 1396,
-        "title": "Breaking Bad",
-        "poster_path": "https://images.metahub.space/poster/medium/tt0903747/img",
-        "backdrop_path": "https://images.metahub.space/background/medium/tt0903747/img",
-        "currentTime": 0,
-        "duration": 2880,
-        "progressPercent": 0,
-        "lastWatched": 1793481200477,
-        "mediaType": "tv",
-        "magnetUri": "magnet:?xt=urn:btih:bbd4d315a00580f9cafd9c36f35165c83f13043c&dn=Breaking%20Bad%201%20Temporada%20BDRip%20blruay%20720p%20dublado%20-%20derew&tr=http%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=udp%3A%2F%2F9.rarbg.to%3A2920%2Fannounce&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=http%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=https%3A%2F%2Ftracker.tamersunion.org%3A443%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.vc%3A6969%2Fannounce",
-        "episodeNumber": 1,
-        "seasonNumber": 1,
-        "episodeTitle": "Ep. 1 - Piloto"
       },
       {
         "id": 85937,
@@ -157,20 +382,78 @@
     "watched": [],
     "watchlist": [],
     "liked": [],
-    "customLists": [],
+    "customLists": [
+      {
+        "id": "list_1793501476123_k65et",
+        "name": "Filmes pra ver com a Mari",
+        "description": "",
+        "createdAt": 1793501476123,
+        "items": [
+          {
+            "id": 1317288,
+            "imdb_id": "tt27543632",
+            "title": "A Empregada",
+            "original_title": "The Housemaid",
+            "overview": "Em busca de um recomeço, Millie aceita trabalhar como governanta na luxuosa mansão da família Winchester, mas logo descobre que os segredos atrás das portas trancadas são letais.",
+            "poster_path": "https://images.metahub.space/poster/medium/tt27543632/img",
+            "backdrop_path": "https://images.metahub.space/background/large/tt27543632/img",
+            "release_date": "2025-12-19",
+            "vote_average": 7.3,
+            "vote_count": 5200,
+            "genre_ids": [
+              53,
+              9648,
+              18
+            ],
+            "media_type": "movie",
+            "runtime": 131,
+            "genres": [
+              {
+                "id": 53,
+                "name": "Suspense"
+              },
+              {
+                "id": 9648,
+                "name": "Mistério"
+              }
+            ],
+            "stream_url": ""
+          }
+        ]
+      }
+    ],
     "profile": {
       "username": "Cinéfilo Popoca",
       "handle": "@cinfilo",
       "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
       "bio": "Amante de cinema, séries e maratonas em streaming ultra-leve Popoca.",
-      "joinedAt": 1793480730215,
+      "joinedAt": 1793493904830,
       "letterboxdUsername": "",
       "favoriteIds": [
         693134,
         85937,
         533535,
         155
-      ]
+      ],
+      "bannerUrl": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1600&auto=format&fit=crop&q=80"
+    }
+  },
+  {
+    "userId": "default_user",
+    "email": "test@popoca.app",
+    "lastUpdated": 1793494616442,
+    "watchHistory": [],
+    "ratings": {},
+    "watched": [],
+    "watchlist": [],
+    "liked": [],
+    "customLists": [],
+    "profile": {
+      "username": "Cinéfilo Popoca",
+      "handle": "@cinfilo",
+      "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+      "bio": "Amante de cinema, animes e maratonas em streaming ultra-leve.",
+      "joinedAt": 1793494616442
     }
   }
 ]

@@ -1,17 +1,52 @@
 /**
  * Popoca Streaming - FFmpeg Prioritized Real-Time Transcoder & Queue Manager
- * Gerencia processos FFmpeg via fluent-ffmpeg com fila de priorização (Priority Queue),
- * flags de performance de baixa latência (-preset ultrafast, -tune zerolatency, -threads 2),
- * limite de concorrência e destruição imediata de streams e processos ao fechar conexão.
+ * - Probe ultrarrápido de cabeçalho em memória (~40ms) para detectar faixa exata PT-BR e codec real (H.264 vs HEVC/10-bit)
+ * - Micro-fragmentação fMP4 de 0.4s (-frag_duration 400000) eliminando congelamento de 10s no início do filme
+ * - Sincronismo labial A/V exato em seeks longos (-noaccurate_seek + -avoid_negative_ts make_zero + aresample=async=1)
  */
 
 import ffmpeg from 'fluent-ffmpeg';
+import { spawn } from 'child_process';
+import { createRequire } from 'module';
 import { Readable, Writable } from 'stream';
+
+const require = createRequire(import.meta.url);
+
+let resolvedFfmpegPath = 'ffmpeg';
+try {
+  const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+  if (ffmpegInstaller?.path) {
+    resolvedFfmpegPath = ffmpegInstaller.path;
+    ffmpeg.setFfmpegPath(resolvedFfmpegPath);
+    console.log(`[Transcoder] FFmpeg nativo pronto: ${resolvedFfmpegPath}`);
+  }
+} catch {
+  console.warn('[Transcoder] @ffmpeg-installer/ffmpeg indisponível; usando ffmpeg do PATH.');
+}
+
+export interface ProbedAudioTrack {
+  aIndex: number;
+  lang: string;
+  title: string;
+  codec: string;
+  channels: number;
+}
+
+export interface ProbedMediaInfo {
+  videoCodec: string;
+  is10Bit: boolean;
+  audioTracks: ProbedAudioTrack[];
+  hasPortugueseAudioTrack?: boolean;
+}
 
 export interface TranscodeJobOptions {
   seekSeconds?: number;
   audioOnly?: boolean;
-  priority?: number; // 1 = Alta (streaming interativo do usuário), 2 = Normal
+  preferPortugueseAudio?: boolean;
+  audioTrackIndex?: number;
+  probedInfo?: ProbedMediaInfo | null;
+  sourceFileName?: string;
+  priority?: number;
   jobId?: string;
   onCancel?: () => void;
 }
@@ -20,7 +55,7 @@ interface QueuedJob {
   id: string;
   priority: number;
   createdAt: number;
-  inputStream: Readable;
+  inputSource: Readable | string;
   outputDestination: Writable;
   options: TranscodeJobOptions;
   command?: ffmpeg.FfmpegCommand;
@@ -31,22 +66,195 @@ interface QueuedJob {
 export class TranscoderQueueManager {
   private activeJobs: Map<string, QueuedJob> = new Map();
   private queue: QueuedJob[] = [];
-  private readonly maxConcurrent: number = 2; // Evita saturação de CPU em múltiplos acessos
+  private readonly maxConcurrent: number = 5;
   private jobCounter: number = 0;
 
-  /**
-   * Determina se o arquivo já possui contêiner e formato nativo para o navegador
-   */
   isWebNative(fileName: string): boolean {
     const ext = fileName.toLowerCase().split('.').pop() || '';
     return ['mp4', 'm4v', 'webm'].includes(ext);
   }
 
   /**
-   * Adiciona uma tarefa de transcodificação à fila de priorização
+   * Inspeciona os primeiros ~128KB do contêiner em memória (~40ms) para identificar
+   * todas as trilhas de áudio (ex: Português vs Inglês em Dual Áudio) e se o vídeo é HEVC/10-bit.
    */
+  probeBufferStreams(headerBuffer: Buffer): Promise<ProbedMediaInfo | null> {
+    return new Promise((resolve) => {
+      if (!headerBuffer || headerBuffer.length < 4096) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const done = (val: ProbedMediaInfo | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(val);
+      };
+
+      try {
+        const proc = spawn(resolvedFfmpegPath, [
+          '-hide_banner',
+          '-probesize',
+          String(Math.min(headerBuffer.length, 262144)),
+          '-analyzeduration',
+          '0',
+          '-i',
+          'pipe:0'
+        ]);
+
+        let stderr = '';
+        const safetyTimer = setTimeout(() => {
+          try {
+            proc.kill('SIGKILL');
+          } catch {}
+          done(null);
+        }, 1600);
+
+        proc.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+        });
+
+        proc.on('error', () => {
+          clearTimeout(safetyTimer);
+          done(null);
+        });
+
+        proc.on('close', () => {
+          clearTimeout(safetyTimer);
+          done(this.parseFfmpegStderrProbe(stderr));
+        });
+
+        proc.stdin.on('error', () => {});
+        proc.stdin.end(headerBuffer);
+      } catch {
+        done(null);
+      }
+    });
+  }
+
+  private parseFfmpegStderrProbe(stderr: string): ProbedMediaInfo | null {
+    if (!stderr) return null;
+    const lines = stderr.split(/\r?\n/);
+
+    let videoCodec = 'h264';
+    let is10Bit = false;
+    const audioTracks: ProbedAudioTrack[] = [];
+    let currentAudioTrack: ProbedAudioTrack | null = null;
+
+    for (const line of lines) {
+      const streamMatch = line.match(
+        /Stream #0:\d+(?:\(([a-zA-Z0-9_-]+)\))?(?:\[[^\]]+\])?:\s*(Video|Audio|Subtitle):\s*([a-zA-Z0-9_]+)(.*)/
+      );
+      if (streamMatch) {
+        const lang = (streamMatch[1] || 'und').toLowerCase();
+        const kind = streamMatch[2];
+        const codec = (streamMatch[3] || '').toLowerCase();
+        const rest = streamMatch[4] || '';
+
+        if (kind === 'Video') {
+          currentAudioTrack = null;
+          videoCodec = codec;
+          if (/10le|10be|10-bit|p010/i.test(rest)) {
+            is10Bit = true;
+          }
+        } else if (kind === 'Audio') {
+          const channels = /5\.1|6 channels/i.test(rest)
+            ? 6
+            : /7\.1|8 channels/i.test(rest)
+            ? 8
+            : /mono|1 channels/i.test(rest)
+            ? 1
+            : 2;
+          currentAudioTrack = {
+            aIndex: audioTracks.length,
+            lang,
+            title: '',
+            codec,
+            channels
+          };
+          audioTracks.push(currentAudioTrack);
+        } else {
+          currentAudioTrack = null;
+        }
+        continue;
+      }
+
+      if (currentAudioTrack) {
+        const titleMatch = line.match(/^\s*title\s*:\s*(.+)$/i);
+        if (titleMatch) {
+          currentAudioTrack.title = titleMatch[1].trim();
+        }
+      }
+    }
+
+    const hasPortugueseAudioTrack = audioTracks.some(
+      (t) =>
+        /^(por|pt|pt-br|pob|pb)$/i.test(t.lang) ||
+        /(portug|dublado|\bdub\b|pt-br|ptbr|brasil|nacional)/i.test(t.title)
+    );
+
+    return { videoCodec, is10Bit, audioTracks, hasPortugueseAudioTrack };
+  }
+
+  private resolveAudioSelection(options: TranscodeJobOptions): {
+    audioIndex: number;
+    canCopyAudio: boolean;
+  } {
+    const info = options.probedInfo;
+    const tracks = info?.audioTracks || [];
+
+    if (typeof options.audioTrackIndex === 'number' && options.audioTrackIndex >= 0) {
+      const clamped =
+        tracks.length > 0 ? Math.min(options.audioTrackIndex, tracks.length - 1) : options.audioTrackIndex;
+      const found = tracks[clamped];
+      return {
+        audioIndex: clamped,
+        canCopyAudio: Boolean(found && found.codec === 'aac' && found.channels <= 2 && !options.seekSeconds)
+      };
+    }
+
+    if (tracks.length === 0) {
+      return { audioIndex: 0, canCopyAudio: false };
+    }
+
+    const preferPt = options.preferPortugueseAudio !== false;
+    let chosen = tracks[0];
+
+    if (preferPt) {
+      const ptMatch = tracks.find(
+        (t) =>
+          /^(por|pt|pt-br|pob|pb)$/i.test(t.lang) ||
+          /(portug|dublado|\bdub\b|pt-br|ptbr|brasil|nacional)/i.test(t.title)
+      );
+      if (ptMatch) {
+        chosen = ptMatch;
+      } else if (
+        tracks.length >= 2 &&
+        /^(eng|en|jpn|ja)$/i.test(tracks[0].lang) &&
+        tracks[1].lang === 'und' &&
+        /dublado|\bdual\b|pt-br/i.test(options.sourceFileName || '')
+      ) {
+        // Caso clássico de Dual Áudio onde a trilha 0 está marcada 'eng' e a trilha 1 dublada ficou 'und'
+        chosen = tracks[1];
+      }
+    } else {
+      const origMatch = tracks.find(
+        (t) =>
+          /^(eng|en|jpn|ja|kor|ko|spa|fra|ita|deu)$/i.test(t.lang) ||
+          /(original|english|ingl[eê]s|japanese|japon[eê]s)/i.test(t.title)
+      );
+      if (origMatch) chosen = origMatch;
+    }
+
+    return {
+      audioIndex: chosen.aIndex,
+      canCopyAudio: Boolean(chosen.codec === 'aac' && chosen.channels <= 2 && !options.seekSeconds)
+    };
+  }
+
   transcodeStream(
-    inputStream: Readable,
+    inputSource: Readable | string,
     outputDestination: Writable,
     options: TranscodeJobOptions = {}
   ): { id: string; cancel: () => void; getCommand: () => ffmpeg.FfmpegCommand | undefined } {
@@ -58,25 +266,21 @@ export class TranscoderQueueManager {
       id: jobId,
       priority,
       createdAt: Date.now(),
-      inputStream,
+      inputSource,
       outputDestination,
       options,
       isStarted: false,
       isDestroyed: false
     };
 
-    // Insere ordenado por prioridade (menor número = maior prioridade) e timestamp
     this.queue.push(job);
     this.queue.sort((a, b) => {
       if (a.priority !== b.priority) return a.priority - b.priority;
       return a.createdAt - b.createdAt;
     });
 
-    console.log(`[TranscoderQueue] Job ${jobId} enfileirado com prioridade ${priority}. Fila atual: ${this.queue.length}, Ativos: ${this.activeJobs.size}`);
-
     this.processQueue();
 
-    // Retorna interface de controle para destruição e cancelamento imediato
     return {
       id: jobId,
       cancel: () => this.cancelJob(jobId),
@@ -84,100 +288,144 @@ export class TranscoderQueueManager {
     };
   }
 
-  /**
-   * Processa o próximo job da fila se houver capacidade disponível
-   */
   private processQueue() {
-    if (this.activeJobs.size >= this.maxConcurrent) {
-      return;
+    while (this.activeJobs.size < this.maxConcurrent && this.queue.length > 0) {
+      const nextJob = this.queue.shift();
+      if (!nextJob || nextJob.isDestroyed) continue;
+      this.startJob(nextJob);
     }
-
-    const nextJob = this.queue.shift();
-    if (!nextJob) return;
-
-    if (nextJob.isDestroyed) {
-      this.processQueue();
-      return;
-    }
-
-    this.startJob(nextJob);
   }
 
-  /**
-   * Inicia o processo FFmpeg com as flags de altíssimo desempenho exigidas
-   */
   private startJob(job: QueuedJob) {
     job.isStarted = true;
     this.activeJobs.set(job.id, job);
 
-    console.log(`[TranscoderQueue] Iniciando job FFmpeg ${job.id} (Ativos: ${this.activeJobs.size}/${this.maxConcurrent})`);
+    const probed = job.options.probedInfo;
+    const probedNeedsReencode = probed
+      ? probed.videoCodec !== 'h264' || probed.is10Bit
+      : /(hevc|x265|h\.?265|10\s*-?bits?|av1)/i.test(job.options.sourceFileName || '');
 
-    const command = ffmpeg(job.inputStream);
+    const isHttpInput = typeof job.inputSource === 'string';
+    const seekSec =
+      job.options.seekSeconds && job.options.seekSeconds > 0 ? job.options.seekSeconds : 0;
+
+    // Ordem exata antes do -i:
+    // -noaccurate_seek garante que vídeo (-c:v copy) e áudio (-c:a aac) partam JUNTOS do mesmo keyframe
+    // eliminando o atraso de áudio e o congelamento de 7-10s após avançar o filme!
+    const inOpts: string[] = [];
+    if (seekSec > 0) {
+      inOpts.push('-noaccurate_seek', '-ss', seekSec.toFixed(2));
+    }
+    inOpts.push('-fflags', '+discardcorrupt+nobuffer');
+    if (isHttpInput) {
+      inOpts.push('-seekable', '1', '-reconnect', '1', '-reconnect_streamed', '1');
+    }
+    inOpts.push('-probesize', '196608', '-analyzeduration', '250000');
+
+    const command = ffmpeg(job.inputSource);
+    command.inputOptions(inOpts);
     job.command = command;
 
-    if (job.options.seekSeconds && job.options.seekSeconds > 0) {
-      command.seekInput(job.options.seekSeconds);
-    }
+    const { audioIndex, canCopyAudio } = this.resolveAudioSelection(job.options);
 
     if (job.options.audioOnly) {
-      // Modo Somente Áudio: AAC ultra-leve com streaming nativo
       command
+        .outputOptions([`-map 0:a:${audioIndex}?`, '-sn', '-dn'])
         .noVideo()
         .audioCodec('aac')
         .audioBitrate('128k')
         .audioChannels(2)
         .format('adts');
-    } else {
-      // Remuxing ultra-rápido com cópia direta do fluxo de vídeo (-c:v copy) para eliminar gargalo de CPU e travamentos
+    } else if (probedNeedsReencode) {
       command
-        .videoCodec('copy')
         .outputOptions([
-          '-sn', // Ignora legendas embutidas para evitar corrupção de streaming
-          '-movflags frag_keyframe+empty_moov+default_base_moof'
+          '-map 0:v:0',
+          `-map 0:a:${audioIndex}?`,
+          '-sn',
+          '-dn',
+          '-disposition:a:0 default',
+          '-preset ultrafast',
+          '-tune zerolatency',
+          '-crf 24',
+          '-pix_fmt yuv420p',
+          '-af aresample=async=1',
+          '-avoid_negative_ts make_zero',
+          '-max_muxing_queue_size 2048',
+          '-frag_duration 400000',
+          '-movflags empty_moov+default_base_moof'
         ])
+        .videoCodec('libx264')
         .audioCodec('aac')
-        .audioBitrate('192k')
+        .audioBitrate('160k')
         .audioChannels(2)
         .format('mp4');
+    } else {
+      const outOpts = [
+        '-map 0:v:0',
+        `-map 0:a:${audioIndex}?`,
+        '-sn',
+        '-dn',
+        '-disposition:a:0 default',
+        '-avoid_negative_ts make_zero',
+        '-max_muxing_queue_size 2048',
+        '-frag_duration 400000',
+        '-movflags empty_moov+default_base_moof'
+      ];
+      if (!canCopyAudio) {
+        outOpts.push('-af aresample=async=1');
+      }
+
+      command
+        .outputOptions(outOpts)
+        .videoCodec('copy')
+        .audioCodec(canCopyAudio ? 'copy' : 'aac');
+
+      if (!canCopyAudio) {
+        command.audioBitrate('192k').audioChannels(2);
+      }
+      command.format('mp4');
     }
 
     command.on('start', (cmdline) => {
-      console.log(`[Transcoder FFmpeg] Job ${job.id} rodando: ${cmdline.slice(0, 80)}...`);
+      console.log(
+        `[Transcoder FFmpeg] Job ${job.id} [audio=#${audioIndex}, seek=${seekSec}s, copyV=${!probedNeedsReencode}]: ${cmdline.slice(0, 92)}...`
+      );
     });
 
     command.on('error', (err) => {
-      if (err.message && (err.message.includes('SIGKILL') || err.message.includes('Output stream closed'))) {
-        console.log(`[Transcoder FFmpeg] Job ${job.id} encerrado pelo cliente.`);
-      } else {
-        console.warn(`[Transcoder FFmpeg] Aviso no Job ${job.id}:`, err.message);
+      const msg = err?.message || '';
+      if (
+        !msg.includes('SIGKILL') &&
+        !msg.includes('Output stream closed') &&
+        !msg.includes('Premature close') &&
+        !msg.includes('pipe:0: Invalid data')
+      ) {
+        console.warn(`[Transcoder FFmpeg] Aviso no Job ${job.id}:`, msg);
       }
       this.finalizeJob(job.id);
     });
 
     command.on('end', () => {
-      console.log(`[Transcoder FFmpeg] Job ${job.id} finalizado.`);
       this.finalizeJob(job.id);
     });
 
     command.pipe(job.outputDestination, { end: true });
   }
 
-  /**
-   * Cancela e destrói imediatamente o processo FFmpeg e libera recursos
-   */
   cancelJob(jobId: string) {
-    // 1. Se estiver na fila pendente, remove
-    const queueIdx = this.queue.findIndex(j => j.id === jobId);
+    const queueIdx = this.queue.findIndex((j) => j.id === jobId);
     if (queueIdx !== -1) {
       const [removed] = this.queue.splice(queueIdx, 1);
       removed.isDestroyed = true;
-      try { removed.inputStream.destroy(); } catch {}
+      try {
+        if (typeof removed.inputSource !== 'string') {
+          removed.inputSource.destroy();
+        }
+      } catch {}
       removed.options.onCancel?.();
-      console.log(`[TranscoderQueue] Job ${jobId} removido da fila antes de iniciar.`);
       return;
     }
 
-    // 2. Se estiver em execução ativa, mata o processo imediatamente com SIGKILL
     const active = this.activeJobs.get(jobId);
     if (active) {
       active.isDestroyed = true;
@@ -185,41 +433,28 @@ export class TranscoderQueueManager {
         if (active.command) {
           active.command.kill('SIGKILL');
         }
-      } catch (err) {
-        // no-op
-      }
-      try {
-        active.inputStream.destroy();
       } catch {}
-
-      active.options.onCancel?.();
-      this.activeJobs.delete(jobId);
-      console.log(`[TranscoderQueue] Job ativo ${jobId} cancelado e destruído com SIGKILL.`);
-      this.processQueue();
+      try {
+        if (typeof active.inputSource !== 'string') {
+          active.inputSource.destroy();
+        }
+      } catch {}
+      this.finalizeJob(jobId);
     }
   }
 
-  /**
-   * Finaliza o job e aloca o próximo da fila
-   */
   private finalizeJob(jobId: string) {
     const job = this.activeJobs.get(jobId);
-    if (job) {
-      job.isDestroyed = true;
-      try { job.inputStream.destroy(); } catch {}
-      this.activeJobs.delete(jobId);
-      this.processQueue();
-    }
+    if (!job) return;
+    this.activeJobs.delete(jobId);
+    job.options.onCancel?.();
+    this.processQueue();
   }
 
-  /**
-   * Retorna estatísticas da fila
-   */
-  getStats() {
+  getQueueStatus() {
     return {
       activeCount: this.activeJobs.size,
-      queuedCount: this.queue.length,
-      maxConcurrent: this.maxConcurrent
+      queuedCount: this.queue.length
     };
   }
 }

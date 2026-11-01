@@ -1,20 +1,46 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Popoca Streaming</title>
-    <meta name="description" content="Plataforma de streaming web ultra-leve para filmes, séries e animes diretamente via torrent com suporte a HTTP 206, transcode em tempo real e experiência Apple TV." />
-    <meta property="og:title" content="Popoca Streaming" />
-    <meta property="og:description" content="Plataforma de streaming web ultra-leve para filmes, séries e animes diretamente via torrent com suporte a HTTP 206, transcode em tempo real e experiência Apple TV." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <title>Popoca</title>
+    <meta name="description" content="Popoca — Filmes, Séries e Animes com experiência Apple TV." />
+    <meta property="og:title" content="Popoca" />
+    <meta property="og:description" content="Filmes, Séries e Animes com experiência Apple TV." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('popoca_theme');
+          if (saved === 'light') {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          } else {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-[#0A0C10] text-white antialiased selection:bg-slate-800 selection:text-white dark:selection:bg-white dark:selection:text-black overflow-x-hidden">
+  <body class="bg-[#EEF2F7] text-slate-900 dark:bg-[#07090E] dark:text-white antialiased selection:bg-slate-900 selection:text-white dark:selection:bg-white dark:selection:text-black overflow-x-hidden">
     <div id="root"></div>
+    <script>
+      if (window.location.protocol === 'file:' || window.location.port === '5500' || window.location.port === '5501') {
+        const root = document.getElementById('root');
+        if (root) {
+          root.innerHTML = '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:sans-serif;background:#07090E;color:#fff;">' +
+            '<h2 style="font-size:20px;font-weight:800;margin-bottom:8px;">Popoca Server</h2>' +
+            '<p style="font-size:14px;color:rgba(255,255,255,0.7);max-width:440px;line-height:1.5;margin-bottom:16px;">Abra pelo servidor integrado na porta <b>3000</b>:</p>' +
+            '<a href="http://localhost:3000" style="padding:12px 24px;border-radius:999px;background:#fff;color:#000;font-weight:800;text-decoration:none;font-size:14px;">Abrir http://localhost:3000</a>' +
+            '</div>';
+        }
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

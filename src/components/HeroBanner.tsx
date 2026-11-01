@@ -1,161 +1,310 @@
 /**
- * Popoca Streaming - Hero Banner Cinematográfico
- * Destaque visual estilo Apple TV em estética grafite minimalista (zero vermelho)
- * com metadados unboxed, LazyImage e ações rápidas Letterboxd.
+ * Popoca Streaming - Apple TV+ Widescreen Cinema Stage (HeroBanner)
+ * - Luminosidade cinematográfica constante (zero estouro de brilho após carregar o backdrop)
+ * - Palco escuro arredondado estilo Apple TV+ que preserva contraste perfeito tanto no modo escuro quanto no modo claro
+ * - Filmes atuais de 2026 verificados e layout 100% responsivo em telas pequenas e grandes
  */
 
-import React, { useState } from 'react';
-import { Play, Info, Star, Heart, Bookmark, Layers } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Play,
+  Info,
+  Star,
+  Heart,
+  Bookmark,
+  Layers,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { MediaItem } from '../types/index.ts';
 import { storageService } from '../services/storage.ts';
 import { LazyImage } from './LazyImage.tsx';
 
 interface HeroBannerProps {
-  media: MediaItem | null;
+  media?: MediaItem | null;
+  items?: MediaItem[];
   onPlay: (media: MediaItem) => void;
   onOpenDetails: (media: MediaItem) => void;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({
   media,
+  items,
   onPlay,
   onOpenDetails
 }) => {
-  if (!media) return null;
+  const slides = (items && items.length > 0 ? items : media ? [media] : []).slice(0, 8);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const timerRef = useRef<any>(null);
 
-  const [isLiked, setIsLiked] = useState(storageService.isLiked(media.id));
-  const [inWatchlist, setInWatchlist] = useState(storageService.isInWatchlist(media.id));
+  const activeIndex = currentIndex >= slides.length ? 0 : currentIndex;
+  const currentMedia = slides[activeIndex];
 
-  const year = media.release_date ? media.release_date.slice(0, 4) : '2024';
-  const categoryLabel = media.media_type === 'tv' ? 'Série' : (media.media_type === 'anime' ? 'Anime' : 'Filme');
-  const isEpisodic = media.media_type === 'tv' || media.media_type === 'anime' || (media.seasons && media.seasons.length > 0);
+  useEffect(() => {
+    if (slides.length <= 1 || isHovered) return;
 
-  const handleToggleLike = () => {
-    const newState = storageService.toggleLiked(media);
+    timerRef.current = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % slides.length);
+    }, 8000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [slides.length, isHovered, activeIndex]);
+
+  const [isLiked, setIsLiked] = useState(() =>
+    currentMedia ? storageService.isLiked(currentMedia.id) : false
+  );
+  const [inWatchlist, setInWatchlist] = useState(() =>
+    currentMedia ? storageService.isInWatchlist(currentMedia.id) : false
+  );
+
+  useEffect(() => {
+    if (!currentMedia) return;
+    setIsLiked(storageService.isLiked(currentMedia.id));
+    setInWatchlist(storageService.isInWatchlist(currentMedia.id));
+  }, [currentMedia?.id]);
+
+  if (!currentMedia) return null;
+
+  const year = currentMedia.release_date ? currentMedia.release_date.slice(0, 4) : '2026';
+  const categoryLabel =
+    currentMedia.media_type === 'tv'
+      ? 'Série'
+      : currentMedia.media_type === 'anime'
+      ? 'Anime'
+      : 'Filme';
+  const primaryGenre = currentMedia.genres?.[0]?.name;
+  const isEpisodic =
+    currentMedia.media_type === 'tv' ||
+    currentMedia.media_type === 'anime' ||
+    Boolean(currentMedia.seasons && currentMedia.seasons.length > 0);
+
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
+  };
+
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev + 1) % slides.length);
+  };
+
+  const handleToggleLike = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newState = storageService.toggleLiked(currentMedia);
     setIsLiked(newState);
   };
 
-  const handleToggleWatchlist = () => {
-    const newState = storageService.toggleWatchlist(media);
+  const handleToggleWatchlist = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newState = storageService.toggleWatchlist(currentMedia);
     setInWatchlist(newState);
   };
 
   const handlePrimaryClick = () => {
     if (isEpisodic) {
-      onOpenDetails(media);
+      onOpenDetails(currentMedia);
     } else {
-      onPlay(media);
+      onPlay(currentMedia);
     }
   };
 
   return (
-    <section className="relative w-full h-[64vh] min-h-[460px] max-h-[700px] overflow-hidden select-none">
-      {/* Imagem de Fundo em Alta Definição com LazyImage */}
-      <div className="absolute inset-0">
-        <LazyImage
-          src={media.backdrop_path}
-          alt={media.title}
-          title={media.title}
-          aspectRatio="auto"
-          className="w-full h-full object-cover object-top scale-105"
-        />
+    <div className="max-w-[1440px] mx-auto px-2.5 sm:px-5 lg:px-8 pt-1.5 sm:pt-2">
+      <section
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className="relative w-full h-[430px] sm:h-[520px] lg:h-[620px] rounded-[24px] sm:rounded-[32px] overflow-hidden bg-[#07090E] select-none group shadow-[0_24px_60px_-15px_rgba(15,23,42,0.35)] dark:shadow-[0_28px_70px_-15px_rgba(0,0,0,0.75)] ring-1 ring-slate-900/10 dark:ring-white/[0.1]"
+      >
+        {/* Imagem de Fundo com Transição Lenta e Gradual de Brilho Cinematográfico Apple TV+ */}
+        <AnimatePresence mode="sync">
+          <motion.div
+            key={currentMedia.id}
+            initial={{ opacity: 0, scale: 1.03, filter: 'brightness(0.38) contrast(1.0)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'brightness(0.62) contrast(1.06)' }}
+            exit={{ opacity: 0, filter: 'brightness(0.35)' }}
+            transition={{ duration: 1.5, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute inset-0 bg-[#07090E]"
+          >
+            <LazyImage
+              src={currentMedia.backdrop_path}
+              alt={currentMedia.title}
+              title={currentMedia.title}
+              aspectRatio="auto"
+              darkPlaceholder
+              className="w-full h-full"
+              imgClassName="object-top contrast-[1.06] saturate-[1.05]"
+            />
+          </motion.div>
+        </AnimatePresence>
 
-        {/* Gradientes cinematográficos de contraste (Horizontal e Vertical) */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#F8FAFC] via-black/75 to-transparent dark:from-[#0A0C10] dark:via-[#0A0C10]/65 dark:to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-transparent md:w-3/4" />
-      </div>
+        {/* Scrims Cinematográficos Apple TV+ (topo, base e lateral esquerda constantes) */}
+        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-[#07090E]/55 via-[#07090E]/20 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#07090E] via-[#07090E]/55 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#07090E]/90 via-[#07090E]/45 to-transparent sm:w-4/5 pointer-events-none" />
 
-      {/* Conteúdo do Destaque */}
-      <div className="relative h-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col justify-end pb-16 md:pb-20 z-10">
-        <div className="max-w-2xl space-y-4">
-          {/* Metadados desempacotados (Zero-Pill Minimalist) */}
-          <div className="flex items-center flex-wrap gap-2 text-xs sm:text-sm font-medium text-white/70">
-            <span className="text-white font-semibold">{categoryLabel}</span>
-            <span aria-hidden="true" className="text-white/40">·</span>
-            <span>{year}</span>
-            {media.runtime && (
-              <>
-                <span aria-hidden="true" className="text-white/40">·</span>
-                <span>{Math.floor(media.runtime / 60)}h {media.runtime % 60}m</span>
-              </>
-            )}
-            {media.vote_average > 0 && (
-              <>
-                <span aria-hidden="true" className="text-white/40">·</span>
-                <span className="flex items-center gap-1 text-amber-400 font-mono font-bold">
-                  <Star className="w-3.5 h-3.5 fill-current" />
-                  {media.vote_average.toFixed(1)}
-                </span>
-              </>
-            )}
-            <span aria-hidden="true" className="text-white/40">·</span>
-            <span className="text-white/90 tracking-wide font-medium">Áudio pt-BR Priorizado</span>
-          </div>
-
-          {/* Título Principal */}
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight line-clamp-2">
-            {media.title}
-          </h1>
-
-          {/* Sinopse resumida */}
-          <p className="text-xs sm:text-sm text-white/80 line-clamp-3 leading-relaxed max-w-xl">
-            {media.overview}
-          </p>
-
-          {/* Botões de Ação Apple TV Style (White & Graphite Glass) */}
-          <div className="flex items-center gap-3 pt-2 flex-wrap">
+        {/* Setas Laterais Discretas */}
+        {slides.length > 1 && (
+          <>
             <button
-              onClick={handlePrimaryClick}
-              className="flex items-center gap-2.5 px-6 py-3.5 bg-white text-black hover:bg-neutral-200 text-sm font-black rounded-2xl shadow-2xl transition-transform active:scale-95"
+              type="button"
+              onClick={handlePrev}
+              aria-label="Anterior"
+              className="hidden sm:flex absolute left-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/45 backdrop-blur-xl border border-white/15 items-center justify-center text-white/75 hover:text-white hover:bg-white/20 transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
             >
-              {isEpisodic ? (
-                <>
-                  <Layers className="w-4 h-4 fill-current" />
-                  <span>Escolher Episódio</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current ml-0.5" />
-                  <span>Assistir Agora</span>
-                </>
-              )}
+              <ChevronLeft className="w-5 h-5" />
             </button>
-
             <button
-              onClick={() => onOpenDetails(media)}
-              className="flex items-center gap-2 px-5 py-3.5 glass-panel hover:bg-white/10 text-white text-sm font-semibold rounded-2xl transition-colors"
+              type="button"
+              onClick={handleNext}
+              aria-label="Próximo"
+              className="hidden sm:flex absolute right-4 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-black/45 backdrop-blur-xl border border-white/15 items-center justify-center text-white/75 hover:text-white hover:bg-white/20 transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
             >
-              <Info className="w-4 h-4" />
-              <span>Mais Informações</span>
+              <ChevronRight className="w-5 h-5" />
             </button>
+          </>
+        )}
 
-            {/* Ações de Perfil Letterboxd Rápidas */}
-            <div className="flex items-center gap-1.5 ml-1">
-              <button
-                onClick={handleToggleLike}
-                className={`p-3 rounded-2xl glass-subtle hover:bg-white/10 transition-colors ${
-                  isLiked ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
-                }`}
-                title={isLiked ? 'Curtido' : 'Curtir'}
-                aria-label="Curtir"
+        {/* Conteúdo Editorial Limpo Apple TV+ */}
+        <div className="relative h-full px-5 sm:px-9 lg:px-14 pb-6 sm:pb-10 lg:pb-12 flex flex-col justify-end z-10">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentMedia.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.3, ease: 'easeOut' }}
+                className="max-w-2xl space-y-2.5 sm:space-y-3.5"
               >
-                <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
-              </button>
+                {/* Linha de Metadados Minimalista */}
+                <div className="flex items-center flex-wrap gap-2 text-[11px] sm:text-xs font-semibold tracking-wide text-white/75 uppercase">
+                  <span className="text-white">{categoryLabel}</span>
+                  {primaryGenre && (
+                    <>
+                      <span aria-hidden="true" className="text-white/35">·</span>
+                      <span>{primaryGenre}</span>
+                    </>
+                  )}
+                  <span aria-hidden="true" className="text-white/35">·</span>
+                  <span className="font-mono">{year}</span>
+                  {currentMedia.runtime && (
+                    <>
+                      <span aria-hidden="true" className="text-white/35">·</span>
+                      <span className="normal-case">
+                        {Math.floor(currentMedia.runtime / 60)}h {currentMedia.runtime % 60}m
+                      </span>
+                    </>
+                  )}
+                  {currentMedia.vote_average > 0 && (
+                    <>
+                      <span aria-hidden="true" className="text-white/35">·</span>
+                      <span className="flex items-center gap-1 text-amber-400 font-mono font-bold">
+                        <Star className="w-3 h-3 fill-current" />
+                        {currentMedia.vote_average.toFixed(1)}
+                      </span>
+                    </>
+                  )}
+                </div>
 
-              <button
-                onClick={handleToggleWatchlist}
-                className={`p-3 rounded-2xl glass-subtle hover:bg-white/10 transition-colors ${
-                  inWatchlist ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
-                }`}
-                title={inWatchlist ? 'Salvo na Watchlist' : 'Salvar na Watchlist'}
-                aria-label="Watchlist"
-              >
-                <Bookmark className={`w-4 h-4 ${inWatchlist ? 'fill-current' : ''}`} />
-              </button>
-            </div>
+                {/* Título */}
+                <h1 className="text-2xl sm:text-4xl lg:text-[52px] font-extrabold text-white tracking-tight leading-[1.08] line-clamp-2">
+                  {currentMedia.title}
+                </h1>
+
+                {/* Sinopse Concisa */}
+                <p className="text-xs sm:text-sm text-white/80 line-clamp-2 sm:line-clamp-3 leading-relaxed max-w-xl">
+                  {currentMedia.overview}
+                </p>
+
+                {/* Ações em Pílula Estilo Apple TV+ */}
+                <div className="flex items-center gap-2.5 pt-1 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handlePrimaryClick}
+                    className="flex items-center gap-2 px-5 sm:px-7 py-2.5 sm:py-3 bg-white text-black hover:bg-white/90 text-xs sm:text-sm font-bold rounded-full shadow-xl transition-transform active:scale-95 cursor-pointer"
+                  >
+                    {isEpisodic ? (
+                      <>
+                        <Layers className="w-4 h-4 fill-current" />
+                        <span>Episódios</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-current ml-0.5" />
+                        <span>Assistir</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onOpenDetails(currentMedia)}
+                    className="flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full bg-white/14 hover:bg-white/22 backdrop-blur-2xl border border-white/18 text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+                  >
+                    <Info className="w-4 h-4" />
+                    <span>Detalhes</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleToggleLike}
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${
+                      isLiked
+                        ? 'bg-white text-black border-white'
+                        : 'bg-white/12 border-white/16 text-white/80 hover:text-white hover:bg-white/20'
+                    }`}
+                    title={isLiked ? 'Curtido' : 'Curtir'}
+                    aria-label="Curtir"
+                  >
+                    <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleToggleWatchlist}
+                    className={`w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center backdrop-blur-2xl border transition-colors cursor-pointer ${
+                      inWatchlist
+                        ? 'bg-white text-black border-white'
+                        : 'bg-white/12 border-white/16 text-white/80 hover:text-white hover:bg-white/20'
+                    }`}
+                    title={inWatchlist ? 'Na Watchlist' : 'Adicionar à Watchlist'}
+                    aria-label="Watchlist"
+                  >
+                    <Bookmark className={`w-4 h-4 ${inWatchlist ? 'fill-current' : ''}`} />
+                  </button>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Indicadores Minimalistas Apple TV+ */}
+            {slides.length > 1 && (
+              <div className="flex items-center gap-1.5 self-start lg:self-end pt-1">
+                {slides.map((s, idx) => {
+                  const isActive = idx === activeIndex;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setCurrentIndex(idx)}
+                      title={s.title}
+                      aria-label={`Ir para ${s.title}`}
+                      className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                        isActive
+                          ? 'w-7 bg-white shadow-sm'
+                          : 'w-1.5 bg-white/35 hover:bg-white/65'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 };

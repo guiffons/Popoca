@@ -1,14 +1,15 @@
 /**
  * Popoca Streaming - IndexedDB Persistence Service
- * Camada offline-first de alta performance para armazenamento local de metadados do TMDB,
- * catálogos paginados, detalhes de mídias e cache de buscas, evitando requisições repetidas
- * e proporcionando carregamento instantâneo da UI mesmo offline.
+ * Camada offline-first de alta performance para armazenamento local de metadados do TMDB (pt-BR),
+ * catálogos paginados, detalhes de mídias, cache de buscas e integração com o cache temporário
+ * de chunks de vídeo da sessão atual (`videoChunkCache`).
  */
 
-import { MediaItem, Episode } from '../types/index.ts';
+import { MediaItem, Episode, StreamCacheSnapshot } from '../types/index.ts';
+import { videoChunkCache } from './videoChunkCache.ts';
 
 const DB_NAME = 'popoca_tmdb_db';
-const DB_VERSION = 2;
+const DB_VERSION = 7; // v7: Correção IMDb ID Dragon Ball Z (tt0214341) e atualização limpa de capas
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 Horas de validade de cache
 
 class PopocaIndexedDB {
@@ -28,25 +29,34 @@ class PopocaIndexedDB {
 
         request.onupgradeneeded = (event) => {
           const db = (event.target as IDBOpenDBRequest).result;
+          const tx = (event.target as IDBOpenDBRequest).transaction;
 
           // 1. Armazena listas de catálogos (ex: "trending_1", "movies_2", "anime_1")
           if (!db.objectStoreNames.contains('catalogs')) {
             db.createObjectStore('catalogs', { keyPath: 'key' });
+          } else if (tx) {
+            tx.objectStore('catalogs').clear();
           }
 
           // 2. Armazena detalhes individuais de filmes, séries e animes com temporadas/episódios
           if (!db.objectStoreNames.contains('media_details')) {
             db.createObjectStore('media_details', { keyPath: 'id' });
+          } else if (tx) {
+            tx.objectStore('media_details').clear();
           }
 
           // 3. Armazena resultados de busca global
           if (!db.objectStoreNames.contains('search_cache')) {
             db.createObjectStore('search_cache', { keyPath: 'query' });
+          } else if (tx) {
+            tx.objectStore('search_cache').clear();
           }
 
           // 4. Armazena temporadas e episódios carregados sob demanda (lazy-loading)
           if (!db.objectStoreNames.contains('series_seasons')) {
             db.createObjectStore('series_seasons', { keyPath: 'key' });
+          } else if (tx) {
+            tx.objectStore('series_seasons').clear();
           }
         };
 
@@ -269,6 +279,16 @@ class PopocaIndexedDB {
       console.warn('[IndexedDB] Falha ao salvar temporada em cache:', e);
     }
   }
+
+  // --- CACHE TEMPORÁRIO DE CHUNKS DE VÍDEO DA SESSÃO ATUAL ---
+  getVideoChunkCache() {
+    return videoChunkCache;
+  }
+
+  async getVideoBufferSnapshot(streamKey: string, fallbackTotalBytes = 0): Promise<StreamCacheSnapshot> {
+    return videoChunkCache.getStreamCacheSnapshot(streamKey, fallbackTotalBytes);
+  }
 }
 
 export const idbService = new PopocaIndexedDB();
+export { videoChunkCache };

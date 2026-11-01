@@ -2,25 +2,42 @@
  * Popoca Streaming - API Client Service
  * Comunicação de alto desempenho com o backend Node.js,
  * integração offline-first com IndexedDB para metadados TMDB sem requisições repetidas,
- * extração e validação rigorosa de infoHash (40-hex lowercase),
- * formatação exata de tamanho de arquivo (GB/MB) e proxy de streams HTTP 206.
+ * suporte ao Seletor de Prioridade de Tracker, Re-try de Peers em tempo real e proxy HTTP 206.
  */
 
-import { MediaItem, TorrentSource, Episode } from '../types/index.ts';
+import {
+  MediaItem,
+  TorrentSource,
+  Episode,
+  TrackerPriorityMode,
+  TorrentLiveStats
+} from '../types/index.ts';
 import { idbService } from './db.ts';
+
+const TRACKER_PRIORITY_STORAGE_KEY = 'popoca_tracker_priority';
+const PREFERRED_QUALITY_STORAGE_KEY = 'popoca_preferred_quality';
+
+export type FixedVideoQuality = '720p' | '1080p' | '4K';
+
+export interface SubtitleTrackInfo {
+  id: string;
+  lang: string;
+  label: string;
+  release?: string;
+}
 
 // Extrai e valida o infoHash de 40 caracteres hexadecimais a partir de magnet URI ou hash
 export function extractInfoHash(magnetOrHash: string): string {
   if (!magnetOrHash) return '';
 
-  // 1. Regex padrão para BTIH em formato hex (40 caracteres)
-  const hexMatch = magnetOrHash.match(/btih:([a-fA-F0-9]{40})/i) || magnetOrHash.match(/([a-fA-F0-9]{40})/i);
+  const hexMatch =
+    magnetOrHash.match(/btih:([a-fA-F0-9]{40})/i) || magnetOrHash.match(/([a-fA-F0-9]{40})/i);
   if (hexMatch) {
     return hexMatch[1].toLowerCase();
   }
 
-  // 2. Formato Base32 (32 caracteres RFC 4648)
-  const b32Match = magnetOrHash.match(/btih:([a-zA-Z2-7]{32})/i) || magnetOrHash.match(/([a-zA-Z2-7]{32})/i);
+  const b32Match =
+    magnetOrHash.match(/btih:([a-zA-Z2-7]{32})/i) || magnetOrHash.match(/([a-zA-Z2-7]{32})/i);
   if (b32Match) {
     const b32 = b32Match[1].toUpperCase();
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -36,7 +53,6 @@ export function extractInfoHash(magnetOrHash: string): string {
     return hex.toLowerCase().slice(0, 40).padEnd(40, '0');
   }
 
-  // Fallback: limpa e preenche
   return magnetOrHash.replace(/[^a-fA-F0-9]/g, '').slice(0, 40).toLowerCase().padEnd(40, '0');
 }
 
@@ -61,15 +77,135 @@ export const api = {
   extractInfoHash,
   formatFileSize,
 
+  getPreferredQuality(): FixedVideoQuality {
+    try {
+      const saved = localStorage.getItem(PREFERRED_QUALITY_STORAGE_KEY);
+      if (saved === '720p' || saved === '1080p' || saved === '4K') {
+        return saved;
+      }
+    } catch {}
+    return '1080p';
+  },
+
+  setPreferredQuality(quality: FixedVideoQuality): void {
+    try {
+      localStorage.setItem(PREFERRED_QUALITY_STORAGE_KEY, quality);
+    } catch {}
+  },
+
+  /**
+   * Seleciona a melhor fonte P2P respeitando estritamente:
+   * 1. Prioridade absoluta de áudio em Português (PT-BR Dublado/Dual) por padrão
+   * 2. Qualidade fixa escolhida pelo usuário (Padrão: 1080p, ou 720p / 4K)
+   * 3. Separação rígida entre PT-BR e Original (só usa Original se não houver nenhuma fonte PT-BR ativa)
+   */
+  pickBestTorrentSource(
+    sources: TorrentSource[],
+    options: {
+      preferredQuality?: FixedVideoQuality | 'all';
+      preferPortuguese?: boolean;
+    } = {}
+  ): TorrentSource | undefined {
+    if (!sources || sources.length === 0) return undefined;
+
+    const targetQuality =
+      options.preferredQuality && options.preferredQuality !== 'all'
+        ? options.preferredQuality
+        : api.getPreferredQuality();
+    const preferPt = options.preferPortuguese !== false;
+
+    const sortByStability = (list: TorrentSource[]) =>
+      [...list].sort(
+        (a, b) => (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds) || b.seeds - a.seeds
+      );
+
+    const pickFromLanguagePool = (pool: TorrentSource[]): TorrentSource | undefined => {
+      if (pool.length === 0) return undefined;
+      const exactQualityHealthy = sortByStability(
+        pool.filter((s) => s.quality === targetQuality && s.seeds >= 2)
+      );
+      if (exactQualityHealthy.length > 0) return exactQualityHealthy[0];
+
+      // Se a qualidade pedida não tiver >= 2 seeds nesse idioma, tenta 1080p -> 720p -> 4K dentro do MESMO idioma!
+      for (const fallbackQ of ['1080p', '720p', '4K'] as const) {
+        const qMatches = sortByStability(
+          pool.filter((s) => s.quality === fallbackQ && s.seeds >= 2)
+        );
+        if (qMatches.length > 0) return qMatches[0];
+      }
+
+      const anySeed = sortByStability(pool.filter((s) => s.seeds >= 1));
+      return anySeed[0] || sortByStability(pool)[0];
+    };
+
+    const ptPool = sources.filter((s) => s.isPortugueseAudio);
+    const origPool = sources.filter((s) => !s.isPortugueseAudio);
+
+    if (preferPt) {
+      return pickFromLanguagePool(ptPool) || pickFromLanguagePool(origPool);
+    }
+    return pickFromLanguagePool(origPool) || pickFromLanguagePool(ptPool);
+  },
+
+  getSavedTrackerPriority(): TrackerPriorityMode {
+    try {
+      const saved = localStorage.getItem(TRACKER_PRIORITY_STORAGE_KEY);
+      if (saved === 'pt-br-stability' || saved === 'ultra-speed' || saved === 'global-balanced') {
+        return saved;
+      }
+    } catch {}
+    return 'pt-br-stability';
+  },
+
+  async setTrackerPriority(
+    mode: TrackerPriorityMode,
+    magnetUri?: string
+  ): Promise<TrackerPriorityMode> {
+    try {
+      localStorage.setItem(TRACKER_PRIORITY_STORAGE_KEY, mode);
+    } catch {}
+    try {
+      await fetch('/api/torrent/tracker-priority', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackerPriority: mode, magnet: magnetUri })
+      });
+    } catch {}
+    return mode;
+  },
+
+  async retryTorrentPeers(
+    magnetUri: string,
+    trackerPriority?: TrackerPriorityMode
+  ): Promise<{ success: boolean; stats: TorrentLiveStats | null }> {
+    if (!magnetUri) return { success: false, stats: null };
+    try {
+      const res = await fetch('/api/torrent/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          magnet: magnetUri,
+          trackerPriority: trackerPriority || api.getSavedTrackerPriority()
+        })
+      });
+      if (!res.ok) return { success: false, stats: null };
+      const data = await res.json();
+      return {
+        success: Boolean(data.success),
+        stats: data.stats || null
+      };
+    } catch {
+      return { success: false, stats: null };
+    }
+  },
+
   async getCatalog(category: string = 'trending', page: number = 1): Promise<MediaItem[]> {
-    // 1. Tenta carregar instantaneamente do IndexedDB (Offline-First)
     try {
       const cached = await idbService.getCachedCatalog(category, page);
       if (cached && cached.length > 0) {
-        // Atualiza em background sem travar a interface
         fetch(`/api/catalog?category=${category}&page=${page}`)
-          .then(res => res.ok ? res.json() : null)
-          .then(data => {
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
             if (data?.items?.length) {
               idbService.setCachedCatalog(category, page, data.items);
             }
@@ -77,18 +213,14 @@ export const api = {
           .catch(() => {});
         return cached;
       }
-    } catch {
-      // no-op se IndexedDB falhar
-    }
+    } catch {}
 
-    // 2. Busca na rede com tolerância a falhas
     try {
       const res = await fetch(`/api/catalog?category=${category}&page=${page}`);
       if (!res.ok) return [];
       const data = await res.json();
       const items = data.items || [];
 
-      // Salva no IndexedDB
       if (items.length > 0) {
         idbService.setCachedCatalog(category, page, items);
       }
@@ -102,7 +234,6 @@ export const api = {
   async search(query: string): Promise<MediaItem[]> {
     if (!query.trim()) return [];
 
-    // 1. Cache local IndexedDB
     try {
       const cached = await idbService.getCachedSearch(query);
       if (cached && cached.length > 0) {
@@ -138,10 +269,11 @@ export const api = {
   },
 
   async getDetails(id: number, type: 'movie' | 'tv' | 'anime' = 'movie'): Promise<MediaItem> {
-    // 1. Tenta IndexedDB
     try {
       const cached = await idbService.getCachedDetails(id);
-      if (cached) return cached;
+      if (cached && ((type !== 'tv' && type !== 'anime') || (cached.seasons && cached.seasons.length > 0))) {
+        return cached;
+      }
     } catch {}
 
     const res = await fetch(`/api/details/${id}?type=${type}`);
@@ -155,9 +287,7 @@ export const api = {
     return details;
   },
 
-  // Carregamento sob demanda (lazy-loading) de temporadas e episódios
   async getSeason(seriesId: number, seasonNumber: number): Promise<Episode[]> {
-    // 1. Tenta IndexedDB
     try {
       const cached = await idbService.getCachedSeason(seriesId, seasonNumber);
       if (cached && cached.length > 0) {
@@ -165,7 +295,6 @@ export const api = {
       }
     } catch {}
 
-    // 2. Busca na rede
     try {
       const res = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
       if (!res.ok) throw new Error('Falha ao carregar temporada');
@@ -184,21 +313,30 @@ export const api = {
 
   async getTorrents(
     title: string,
-    options?: {
-      year?: string;
-      imdbId?: string;
-      mediaType?: 'movie' | 'tv' | 'anime';
-      season?: number;
-      episode?: number;
-    } | string
+    options?:
+      | {
+          originalTitle?: string;
+          year?: string;
+          imdbId?: string;
+          mediaType?: 'movie' | 'tv' | 'anime';
+          season?: number;
+          episode?: number;
+          trackerPriority?: TrackerPriorityMode;
+        }
+      | string
   ): Promise<TorrentSource[]> {
     const year = typeof options === 'string' ? options : options?.year;
+    const originalTitle = typeof options === 'object' ? options?.originalTitle : undefined;
     const imdbId = typeof options === 'object' ? options?.imdbId : undefined;
     const mediaType = typeof options === 'object' ? options?.mediaType : undefined;
     const season = typeof options === 'object' ? options?.season : undefined;
     const episode = typeof options === 'object' ? options?.episode : undefined;
+    const trackerPriority =
+      (typeof options === 'object' ? options?.trackerPriority : undefined) ||
+      api.getSavedTrackerPriority();
 
-    const params = new URLSearchParams({ title });
+    const params = new URLSearchParams({ title, trackerPriority });
+    if (originalTitle) params.set('originalTitle', originalTitle);
     if (year) params.set('year', year);
     if (imdbId) params.set('imdbId', imdbId);
     if (mediaType) params.set('mediaType', mediaType);
@@ -210,7 +348,6 @@ export const api = {
     const data = await res.json();
     const rawTorrents: any[] = data.torrents || [];
 
-    // Higieniza rigorosamente cada fonte para garantir infoHash, formato (WEB-DL vs Bluray) e tamanho correto
     return rawTorrents.map((t, idx) => {
       const infoHash = extractInfoHash(t.infoHash || t.magnetUri || `stream_${idx}`);
       const sizeFormatted = t.sizeFormatted || formatFileSize(t.sizeBytes || 2000000000);
@@ -220,37 +357,64 @@ export const api = {
       return {
         id: t.id || `torrent-${infoHash.slice(0, 8)}`,
         title: t.title || title,
-        magnetUri: t.magnetUri || `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(t.title || title)}`,
+        magnetUri:
+          t.magnetUri ||
+          `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(t.title || title)}`,
         infoHash,
         quality,
         format,
-        seeds: typeof t.seeds === 'number' ? t.seeds : 750,
-        peers: typeof t.peers === 'number' ? t.peers : 120,
-        sizeBytes: t.sizeBytes || 2147483648,
+        seeds: typeof t.seeds === 'number' ? t.seeds : 50,
+        peers: typeof t.peers === 'number' ? t.peers : 12,
+        sizeBytes: t.sizeBytes || 1800000000,
         sizeFormatted,
         isPortugueseAudio: Boolean(t.isPortugueseAudio),
         source: t.source || 'P2P Indexer',
+        stabilityScore: typeof t.stabilityScore === 'number' ? t.stabilityScore : t.seeds || 50,
+        trackerPriority: t.trackerPriority || trackerPriority,
         directUrl: t.directUrl
       };
     });
   },
 
-  async getTorrentStats(magnetUri: string) {
-    const res = await fetch(`/api/torrent/stats?magnet=${encodeURIComponent(magnetUri)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.stats;
+  async getTorrentStats(magnetUri: string): Promise<TorrentLiveStats | null> {
+    if (!magnetUri) return null;
+    try {
+      const res = await fetch(`/api/torrent/stats?magnet=${encodeURIComponent(magnetUri)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.stats || null;
+    } catch {
+      return null;
+    }
   },
 
   getStreamUrl(
     magnetUri: string,
-    options: { transcode?: boolean; audioOnly?: boolean; altMagnets?: string[] } = {}
+    options: {
+      transcode?: boolean;
+      audioOnly?: boolean;
+      altMagnets?: string[];
+      trackerPriority?: TrackerPriorityMode;
+      streamKey?: string;
+      seekSeconds?: number;
+      preferPortugueseAudio?: boolean;
+      audioTrackIndex?: number;
+    } = {}
   ): string {
     const params = new URLSearchParams({
-      magnet: magnetUri
+      magnet: magnetUri,
+      trackerPriority: options.trackerPriority || api.getSavedTrackerPriority()
     });
+    if (options.streamKey) params.set('_sk', options.streamKey);
     if (options.transcode) params.set('transcode', 'true');
     if (options.audioOnly) params.set('audioOnly', 'true');
+    params.set('preferPt', options.preferPortugueseAudio === false ? 'false' : 'true');
+    if (typeof options.seekSeconds === 'number' && options.seekSeconds > 1) {
+      params.set('seek', options.seekSeconds.toFixed(1));
+    }
+    if (typeof options.audioTrackIndex === 'number' && options.audioTrackIndex >= 0) {
+      params.set('audioTrack', String(options.audioTrackIndex));
+    }
     if (options.altMagnets && options.altMagnets.length > 0) {
       params.set('altMagnets', JSON.stringify(options.altMagnets.slice(0, 3)));
     }
@@ -263,16 +427,32 @@ export const api = {
       mediaType?: 'movie' | 'tv' | 'anime';
       season?: number;
       episode?: number;
+      quality?: string;
+      trackerPriority?: TrackerPriorityMode;
+      streamKey?: string;
       transcode?: boolean;
       audioOnly?: boolean;
+      seekSeconds?: number;
+      preferPortugueseAudio?: boolean;
+      audioTrackIndex?: number;
     } = {}
   ): string {
     const params = new URLSearchParams();
     if (options.mediaType) params.set('mediaType', options.mediaType);
     if (typeof options.season === 'number') params.set('season', options.season.toString());
     if (typeof options.episode === 'number') params.set('episode', options.episode.toString());
+    if (options.quality) params.set('quality', options.quality);
+    params.set('trackerPriority', options.trackerPriority || api.getSavedTrackerPriority());
+    if (options.streamKey) params.set('_sk', options.streamKey);
     if (options.transcode) params.set('transcode', 'true');
     if (options.audioOnly) params.set('audioOnly', 'true');
+    params.set('preferPt', options.preferPortugueseAudio === false ? 'false' : 'true');
+    if (typeof options.seekSeconds === 'number' && options.seekSeconds > 1) {
+      params.set('seek', options.seekSeconds.toFixed(1));
+    }
+    if (typeof options.audioTrackIndex === 'number' && options.audioTrackIndex >= 0) {
+      params.set('audioTrack', String(options.audioTrackIndex));
+    }
     const qs = params.toString();
     return `/api/stream/${tmdbId}${qs ? `?${qs}` : ''}`;
   },
@@ -281,13 +461,38 @@ export const api = {
     return `/api/stream-video?url=${encodeURIComponent(videoUrl)}`;
   },
 
-  getSubtitleUrl(title: string, lang: string = 'pt-BR'): string {
-    return `/api/subtitles?title=${encodeURIComponent(title)}&lang=${encodeURIComponent(lang)}`;
+  async getSubtitleTracks(options: {
+    imdbId?: string;
+    mediaType: 'movie' | 'tv' | 'anime';
+    season?: number;
+    episode?: number;
+    fileName?: string;
+  }): Promise<SubtitleTrackInfo[]> {
+    if (!options.imdbId) return [];
+    try {
+      const params = new URLSearchParams({ imdbId: options.imdbId, mediaType: options.mediaType });
+      if (typeof options.season === 'number') params.set('season', String(options.season));
+      if (typeof options.episode === 'number') params.set('episode', String(options.episode));
+      if (options.fileName) params.set('fileName', options.fileName);
+      const res = await fetch(`/api/subtitles/list?${params.toString()}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data?.tracks) ? data.tracks : [];
+    } catch {
+      return [];
+    }
   },
 
-  preloadTorrent(magnetUri: string): void {
+  getSubtitleVttUrl(trackId: string): string {
+    return `/api/subtitles/vtt?id=${encodeURIComponent(trackId)}`;
+  },
+
+  preloadTorrent(magnetUri: string, trackerPriority?: TrackerPriorityMode): void {
     if (!magnetUri) return;
-    fetch(`/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}`).catch(() => {});
+    const mode = trackerPriority || api.getSavedTrackerPriority();
+    fetch(
+      `/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}&trackerPriority=${encodeURIComponent(mode)}`
+    ).catch(() => {});
   },
 
   async prefetchNextChunks(
@@ -310,5 +515,30 @@ export const api = {
     } catch {
       return null;
     }
+  },
+
+  async getNetworkInfo(): Promise<{ lanIp: string; port: number; lanOrigin: string }> {
+    try {
+      const res = await fetch('/api/network-info');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.lanOrigin) {
+          return {
+            lanIp: data.lanIp || '127.0.0.1',
+            port: data.port || 3000,
+            lanOrigin: data.lanOrigin
+          };
+        }
+      }
+    } catch {}
+    const fallbackOrigin =
+      typeof window !== 'undefined' && window.location?.origin
+        ? window.location.origin
+        : 'http://localhost:3000';
+    return {
+      lanIp: '127.0.0.1',
+      port: 3000,
+      lanOrigin: fallbackOrigin
+    };
   }
 };

@@ -1,24 +1,76 @@
 /**
  * Popoca Streaming - Servidor de Mídia Full-Stack
  * Backend Node.js Express de altíssimo desempenho para streaming de torrents,
- * integração TMDB pt-BR e servidor de desenvolvimento Vite integrado.
+ * seletor de prioridade de trackers PT-BR, re-try automático/manual de peers,
+ * integração TMDB/IMDb pt-BR e servidor de desenvolvimento Vite integrado.
  */
 
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import os from 'os';
 import path from 'path';
 import http from 'http';
 import https from 'https';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { tmdbService } from './server/tmdbService.ts';
-import { indexerService } from './server/indexerService.ts';
+import { indexerService, TrackerPriorityMode } from './server/indexerService.ts';
 import { torrentEngine } from './server/torrentEngine.ts';
 import { subtitleService } from './server/subtitleService.ts';
 import { syncService } from './server/syncService.ts';
+import { db } from './server/database.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+function getLocalLanIp(): string {
+  try {
+    const nets = os.networkInterfaces();
+    const candidates: Array<{ address: string; priority: number }> = [];
+
+    for (const [name, entries] of Object.entries(nets)) {
+      if (!entries) continue;
+      if (/(wsl|vethernet|virtualbox|vmware|docker|hyper-v|loopback|tailscale|zerotier|hamachi)/i.test(name)) {
+        continue;
+      }
+      for (const net of entries) {
+        if (String(net.family) !== 'IPv4' || net.internal || !net.address) continue;
+        if (net.address.startsWith('169.254.')) continue;
+
+        let priority = 3;
+        if (net.address.startsWith('192.168.')) priority = 1;
+        else if (net.address.startsWith('10.')) priority = 2;
+        else if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(net.address)) priority = 2;
+
+        if (/(wi-?fi|wlan|wireless|ethernet|eth)/i.test(name)) {
+          priority -= 0.5;
+        }
+        candidates.push({ address: net.address, priority });
+      }
+    }
+
+    candidates.sort((a, b) => a.priority - b.priority);
+    if (candidates.length > 0) {
+      return candidates[0].address;
+    }
+  } catch {}
+  return '127.0.0.1';
+}
+
+function escapeHtmlAttr(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function parsePriorityMode(val: unknown): TrackerPriorityMode | undefined {
+  if (val === 'pt-br-stability' || val === 'ultra-speed' || val === 'global-balanced') {
+    return val;
+  }
+  return undefined;
+}
 
 async function bootstrap() {
   const app = express();
@@ -40,7 +92,7 @@ async function bootstrap() {
     }
   });
 
-  // 2. Busca dinâmica
+  // 2. Busca dinâmica com foco em nomes em Português (pt-BR)
   app.get('/api/search', async (req: Request, res: Response) => {
     try {
       const q = (req.query.q as string) || '';
@@ -51,7 +103,7 @@ async function bootstrap() {
     }
   });
 
-  // 2.1 Sugestões de busca preditiva instantânea
+  // 2.1 Sugestões de busca preditiva instantânea em Português
   app.get('/api/search/suggestions', async (req: Request, res: Response) => {
     try {
       const q = (req.query.q as string) || '';
@@ -62,7 +114,7 @@ async function bootstrap() {
     }
   });
 
-  // 3. Detalhes completos do título
+  // 3. Detalhes completos do título (com quantidade exata de temporadas e episódios)
   app.get('/api/details/:id', async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id, 10);
@@ -90,24 +142,76 @@ async function bootstrap() {
     }
   });
 
-  // 4. Provedores e indexador de torrents (YTS, Popcorn API, Torrentio)
+  // 4. Provedores e indexador de torrents com Seletor de Prioridade de Tracker
   app.get('/api/torrents', async (req: Request, res: Response) => {
     try {
       const title = (req.query.title as string) || '';
+      const originalTitle = (req.query.originalTitle as string) || undefined;
       const year = req.query.year as string | undefined;
       const imdbId = req.query.imdbId as string | undefined;
       const mediaType = (req.query.mediaType as 'movie' | 'tv' | 'anime') || 'movie';
       const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
       const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+      const trackerPriority = parsePriorityMode(req.query.trackerPriority);
 
-      if (!title) {
-        res.status(400).json({ success: false, error: 'Parâmetro title é obrigatório' });
+      if (!title && !imdbId) {
+        res.status(400).json({ success: false, error: 'Parâmetro title ou imdbId é obrigatório' });
         return;
       }
-      const torrents = await indexerService.findTorrents(title, year, imdbId, mediaType, season, episode);
-      res.json({ success: true, count: torrents.length, torrents });
+      const torrents = await indexerService.findTorrents({
+        title,
+        originalTitle,
+        year,
+        imdbId,
+        mediaType,
+        season,
+        episode,
+        trackerPriority
+      });
+      res.json({
+        success: true,
+        count: torrents.length,
+        trackerPriority: trackerPriority || indexerService.getTrackerPriority(),
+        torrents
+      });
     } catch (err: any) {
       console.error('[API /torrents] Erro no scraper:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 4.1 Seletor Global de Prioridade de Tracker
+  app.get('/api/torrent/tracker-priority', (_req: Request, res: Response) => {
+    res.json({
+      success: true,
+      trackerPriority: torrentEngine.getTrackerPriority()
+    });
+  });
+
+  app.post('/api/torrent/tracker-priority', (req: Request, res: Response) => {
+    const mode = parsePriorityMode(req.body?.trackerPriority);
+    const magnet = req.body?.magnet as string | undefined;
+    if (!mode) {
+      res.status(400).json({ success: false, error: 'Modo de prioridade de tracker inválido' });
+      return;
+    }
+    indexerService.setTrackerPriority(mode);
+    torrentEngine.setTrackerPriority(mode, magnet);
+    res.json({ success: true, trackerPriority: mode });
+  });
+
+  // 4.2 Re-try Manual ou sob demanda de rastreamento de novos peers
+  app.post('/api/torrent/retry', async (req: Request, res: Response) => {
+    try {
+      const magnet = req.body?.magnet as string;
+      const trackerPriority = parsePriorityMode(req.body?.trackerPriority);
+      if (!magnet) {
+        res.status(400).json({ success: false, error: 'Magnet URI obrigatório para re-try' });
+        return;
+      }
+      const result = await torrentEngine.forceRetryPeers(magnet, trackerPriority);
+      res.json(result);
+    } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -119,10 +223,17 @@ async function bootstrap() {
       const mediaType = (req.query.mediaType as 'movie' | 'tv' | 'anime') || 'movie';
       const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
       const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+      const preferredQuality = req.query.quality as string | undefined;
+      const trackerPriority = parsePriorityMode(req.query.trackerPriority);
       const transcode = req.query.transcode === 'true';
       const audioOnly = req.query.audioOnly === 'true';
+      const seekSeconds = req.query.seek ? parseFloat(req.query.seek as string) : undefined;
+      const preferPortugueseAudio = req.query.preferPt !== 'false';
+      const audioTrackIndex =
+        req.query.audioTrack !== undefined
+          ? parseInt(req.query.audioTrack as string, 10)
+          : undefined;
 
-      // 1. Localiza metadados do TMDB
       const media = await tmdbService.getDetails(tmdbId, mediaType);
       if (!media) {
         res.status(404).send('Título TMDB não encontrado.');
@@ -131,41 +242,92 @@ async function bootstrap() {
 
       const year = media.release_date ? media.release_date.slice(0, 4) : undefined;
 
-      // 2. Consulta agregadores (Torrentio, YTS, Cinemeta) e escolhe o melhor torrent (maior seeds em 1080p/720p)
       const torrents = await indexerService.findTorrents({
         title: media.title,
+        originalTitle: media.original_title,
         year,
         imdbId: media.imdb_id,
         mediaType: media.media_type,
         season,
-        episode
+        episode,
+        trackerPriority
       });
 
-      // 2. Consulta agregadores (Torrentio, YTS, Cinemeta) e tenta os melhores torrents em cascata (waterfall)
-      const topCandidates = torrents.filter(t => t.magnetUri).slice(0, 4);
+      // Prioriza estritamente o idioma solicitado (Português PT-BR por padrão) + qualidade escolhida
+      const validTorrents = torrents.filter((t) => Boolean(t.magnetUri));
+      const langFiltered = preferPortugueseAudio
+        ? validTorrents.filter((t) => t.isPortugueseAudio)
+        : validTorrents.filter((t) => !t.isPortugueseAudio);
+      const languagePool = langFiltered.length > 0 ? langFiltered : validTorrents;
 
-      for (const candidate of topCandidates) {
-        console.log(`[TMDB Stream] Tentando streaming para ID ${tmdbId} via torrent ${candidate.quality} (${candidate.seeds} seeds): ${candidate.title}`);
-        try {
-          await torrentEngine.handleStreamRequest(req, res, candidate.magnetUri, transcode, audioOnly);
-          return;
-        } catch (torrentErr) {
-          console.warn(`[TMDB Stream] Instabilidade na fonte ${candidate.quality}, tentando próxima alternativa...`);
+      const sameQualityCandidates = preferredQuality
+        ? languagePool.filter((t) => t.quality === preferredQuality)
+        : [];
+      let topCandidates = (
+        sameQualityCandidates.length > 0 ? sameQualityCandidates : languagePool
+      ).slice(0, 4);
+
+      if (!seekSeconds && topCandidates.length > 1) {
+        const fastMagnet = await torrentEngine.raceLiveCandidates(
+          topCandidates.map((c) => c.magnetUri),
+          trackerPriority
+        );
+        const winnerObj = topCandidates.find((c) => c.magnetUri === fastMagnet);
+        if (winnerObj) {
+          topCandidates = [winnerObj, ...topCandidates.filter((c) => c !== winnerObj)];
         }
       }
 
-      // 3. Fallback somente se houver URL direta válida (não placeholder)
-      const directUrl = (episode && media.seasons ? media.seasons.flatMap(s => s.episodes).find(e => e.episodeNumber === episode)?.streamUrl : undefined) || media.stream_url;
-      if (directUrl && !directUrl.includes('oceans.mp4') && !directUrl.includes('flower.mp4') && !directUrl.includes('sintel')) {
+      for (const candidate of topCandidates) {
+        console.log(
+          `[TMDB Stream] Tentando streaming para ID ${tmdbId} via torrent ${candidate.quality} [${
+            candidate.isPortugueseAudio ? 'PT-BR' : 'Original'
+          }] (${candidate.seeds} seeds, score=${candidate.stabilityScore}): ${candidate.title}`
+        );
+        try {
+          await torrentEngine.handleStreamRequest(
+            req,
+            res,
+            candidate.magnetUri,
+            transcode,
+            audioOnly,
+            trackerPriority,
+            {
+              seekSeconds,
+              preferPortugueseAudio,
+              audioTrackIndex
+            }
+          );
+          return;
+        } catch {
+          console.warn(`[TMDB Stream] Instabilidade na fonte ${candidate.quality}, tentando próxima semente do mesmo idioma...`);
+          if (res.headersSent) return;
+        }
+      }
+
+      const directUrl =
+        (episode && media.seasons
+          ? media.seasons.flatMap((s) => s.episodes).find((e) => e.episodeNumber === episode)?.streamUrl
+          : undefined) || media.stream_url;
+      if (
+        directUrl &&
+        !directUrl.startsWith('/api/stream') &&
+        !directUrl.includes('oceans.mp4') &&
+        !directUrl.includes('flower.mp4') &&
+        !directUrl.includes('sintel')
+      ) {
         proxyVideoRange(req, res, directUrl);
         return;
       }
 
-      res.status(503).json({
-        success: false,
-        error: 'TORRENT_STREAM_UNAVAILABLE',
-        message: 'A fonte P2P selecionada não possui sementes ativas no momento. Por favor selecione outra opção na lista de torrents (ex: 1080p WEB-DL Dublado PT-BR).'
-      });
+      if (!res.headersSent) {
+        res.status(503).json({
+          success: false,
+          error: 'TORRENT_STREAM_UNAVAILABLE',
+          message:
+            'A fonte P2P selecionada não possui sementes ativas no momento. Use o botão Re-try no Painel de Rede ou selecione outra opção.'
+        });
+      }
     } catch (err: any) {
       console.error('[API /stream/:tmdbId] Erro fatal:', err);
       if (!res.headersSent) {
@@ -174,12 +336,19 @@ async function bootstrap() {
     }
   });
 
-  // 5.1 Streaming HTTP 206 direto por Magnet Link com fallback automático
+  // 5.1 Streaming HTTP 206 direto por Magnet Link com fallback restrito à mesma qualidade e idioma
   app.get('/api/stream', async (req: Request, res: Response) => {
     const magnet = req.query.magnet as string;
     const altMagnetsRaw = req.query.altMagnets as string | undefined;
+    const trackerPriority = parsePriorityMode(req.query.trackerPriority);
     const transcode = req.query.transcode === 'true';
     const audioOnly = req.query.audioOnly === 'true';
+    const seekSeconds = req.query.seek ? parseFloat(req.query.seek as string) : undefined;
+    const preferPortugueseAudio = req.query.preferPt !== 'false';
+    const audioTrackIndex =
+      req.query.audioTrack !== undefined
+        ? parseInt(req.query.audioTrack as string, 10)
+        : undefined;
 
     if (!magnet) {
       res.status(400).send('Magnet URI ausente.');
@@ -191,17 +360,43 @@ async function bootstrap() {
       try {
         const alts = JSON.parse(altMagnetsRaw);
         if (Array.isArray(alts)) {
-          alts.forEach(m => { if (typeof m === 'string' && m && !magnetsToTry.includes(m)) magnetsToTry.push(m); });
+          alts.forEach((m) => {
+            if (typeof m === 'string' && m && !magnetsToTry.includes(m)) magnetsToTry.push(m);
+          });
         }
       } catch {}
     }
 
-    for (const currentMagnet of magnetsToTry) {
+    let orderedMagnets = magnetsToTry;
+    if (!seekSeconds && magnetsToTry.length > 1) {
+      const winnerMagnet = await torrentEngine.raceLiveCandidates(
+        magnetsToTry.slice(0, 4),
+        trackerPriority
+      );
+      if (winnerMagnet) {
+        orderedMagnets = [winnerMagnet, ...magnetsToTry.filter((m) => m !== winnerMagnet)];
+      }
+    }
+
+    for (const currentMagnet of orderedMagnets) {
       try {
-        await torrentEngine.handleStreamRequest(req, res, currentMagnet, transcode, audioOnly);
+        await torrentEngine.handleStreamRequest(
+          req,
+          res,
+          currentMagnet,
+          transcode,
+          audioOnly,
+          trackerPriority,
+          {
+            seekSeconds,
+            preferPortugueseAudio,
+            audioTrackIndex
+          }
+        );
         return;
       } catch (err: any) {
-        console.warn(`[Stream API] Falha na fonte P2P, tentando próxima alternativa se houver: ${err.message}`);
+        console.warn(`[Stream API] Falha na fonte P2P, tentando próxima alternativa da mesma qualidade/idioma: ${err.message}`);
+        if (res.headersSent) return;
       }
     }
 
@@ -209,12 +404,13 @@ async function bootstrap() {
       res.status(503).json({
         success: false,
         error: 'TORRENT_STREAM_UNAVAILABLE',
-        message: 'Não foi possível estabelecer conexão com o enxame deste torrent. Tente outra fonte com mais seeds ou formato alternativo.'
+        message:
+          'Não foi possível estabelecer conexão com o enxame deste torrent no momento. Forçe um Re-try de peers ou selecione outra fonte.'
       });
     }
   });
 
-  // 6. Estatísticas em tempo real do stream (velocidade, sementes, buffer)
+  // 6. Estatísticas reais em tempo real do stream (velocidade real, peers conectados, retries)
   app.get('/api/torrent/stats', (req: Request, res: Response) => {
     const magnet = req.query.magnet as string;
     if (!magnet) {
@@ -229,15 +425,16 @@ async function bootstrap() {
   // 6.1 Pré-aquecimento silencioso de chunks de torrent em segundo plano
   app.get('/api/torrent/preload', async (req: Request, res: Response) => {
     const magnet = req.query.magnet as string;
+    const trackerPriority = parsePriorityMode(req.query.trackerPriority);
     if (!magnet) {
       res.status(400).json({ error: 'Magnet URI ausente' });
       return;
     }
-    torrentEngine.preload(magnet).catch(() => {});
+    torrentEngine.preload(magnet, trackerPriority).catch(() => {});
     res.json({ success: true, status: 'preloading_initiated' });
   });
 
-  // 6.2 Sistema de Prefetch Inteligente (antecipa próximos 3 chunks do torrent)
+  // 6.2 Sistema de Prefetch Inteligente (antecipa próximos 3-5 chunks do torrent)
   app.get('/api/torrent/prefetch', (req: Request, res: Response) => {
     const magnet = req.query.magnet as string;
     const currentTime = parseFloat(req.query.currentTime as string) || 0;
@@ -253,12 +450,36 @@ async function bootstrap() {
     res.json(result);
   });
 
-  // 7. Legendas WebVTT (.vtt) sincronizadas
-  app.get('/api/subtitles', (req: Request, res: Response) => {
-    const title = (req.query.title as string) || 'Filme Popoca';
-    const lang = (req.query.lang as string) || 'pt-BR';
-    const vtt = subtitleService.getTrack(title, lang);
+  // 7. Legendas reais (OpenSubtitles) — lista de faixas disponíveis para o título/episódio
+  app.get('/api/subtitles/list', async (req: Request, res: Response) => {
+    try {
+      const imdbId = (req.query.imdbId as string) || '';
+      const mediaType = (req.query.mediaType as string) || 'movie';
+      const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+      const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+      const fileName = (req.query.fileName as string) || undefined;
 
+      const tracks = await subtitleService.listTracks({
+        imdbId,
+        type: mediaType === 'movie' ? 'movie' : 'series',
+        season,
+        episode,
+        fileName
+      });
+      res.json({ success: true, tracks });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, tracks: [] });
+    }
+  });
+
+  // 7.1 Arquivo WebVTT de uma faixa previamente listada
+  app.get('/api/subtitles/vtt', async (req: Request, res: Response) => {
+    const id = (req.query.id as string) || '';
+    const vtt = await subtitleService.getVtt(id);
+    if (!vtt) {
+      res.status(404).send('Legenda indisponível');
+      return;
+    }
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(vtt);
@@ -348,6 +569,53 @@ async function bootstrap() {
     }
   });
 
+  // 8.4 Autenticação e Gestão de Contas no SQLite
+  app.post('/api/auth/register', (req: Request, res: Response) => {
+    try {
+      const { email, password, username, handle, avatarUrl, bannerUrl, bio } = req.body;
+      const result = db.registerUser({ email, password, username, handle, avatarUrl, bannerUrl, bio });
+      if (!result.success) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json({ success: true, user: result.user });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/auth/login', (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      const result = db.loginUser(email, password);
+      if (!result.success) {
+        res.status(401).json(result);
+        return;
+      }
+      res.json({ success: true, user: result.user });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/auth/profile', (req: Request, res: Response) => {
+    try {
+      const { userId, username, handle, bio, avatarUrl, bannerUrl } = req.body;
+      if (!userId) {
+        res.status(400).json({ success: false, error: 'userId obrigatório' });
+        return;
+      }
+      const updated = db.updateUserProfile(userId, { username, handle, bio, avatarUrl, bannerUrl });
+      if (!updated) {
+        res.status(404).json({ success: false, error: 'Usuário não encontrado' });
+        return;
+      }
+      res.json({ success: true, user: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Helper para Proxy HTTP 206 Partial Content com Range Requests
   function proxyVideoRange(req: Request, res: Response, videoUrl: string) {
     try {
@@ -373,7 +641,9 @@ async function bootstrap() {
         upstreamRes.pipe(res);
       });
       req.on('close', () => {
-        try { upstreamReq.destroy(); } catch {}
+        try {
+          upstreamReq.destroy();
+        } catch {}
       });
       upstreamReq.on('error', () => {
         if (!res.headersSent) res.status(502).end();
@@ -389,7 +659,184 @@ async function bootstrap() {
     proxyVideoRange(req, res, videoUrl);
   });
 
-  // Servidor Frontend Vite em Dev ou Estático em Prod
+  // 10. Informações da Rede Local Wi-Fi (para Transmissão Smart TV / Web Video Caster / Celular)
+  app.get('/api/network-info', (_req: Request, res: Response) => {
+    const lanIp = getLocalLanIp();
+    res.json({
+      success: true,
+      lanIp,
+      port: PORT,
+      lanOrigin: `http://${lanIp}:${PORT}`
+    });
+  });
+
+  // 10.1 Receptor Smart TV & Ponte Web Video Caster / VLC (/tv)
+  app.get('/tv', (req: Request, res: Response) => {
+    const rawSrc = typeof req.query.src === 'string' ? req.query.src : '';
+    const safeSrc = rawSrc.startsWith('/api/') ? rawSrc : '/api/stream';
+    const rawTitle = typeof req.query.title === 'string' ? req.query.title : 'Popoca Streaming';
+    const rawQuality = typeof req.query.quality === 'string' ? req.query.quality : '1080p';
+    const rawLang = typeof req.query.lang === 'string' ? req.query.lang : 'PT-BR';
+    const startTime = req.query.time ? Math.max(0, Math.floor(Number(req.query.time) || 0)) : 0;
+
+    const escapedTitle = escapeHtmlAttr(rawTitle);
+    const escapedQuality = escapeHtmlAttr(rawQuality);
+    const escapedLang = escapeHtmlAttr(rawLang);
+    const escapedSrcJson = JSON.stringify(safeSrc);
+    const escapedTitleJson = JSON.stringify(rawTitle);
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>${escapedTitle} · Popoca TV</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #05070b;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      background: rgba(14, 18, 26, 0.92);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(16, 185, 129, 0.18);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      white-space: nowrap;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      appearance: none;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 9px 14px;
+      border-radius: 999px;
+      text-decoration: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .btn:hover { background: rgba(255,255,255,0.16); }
+    .btn:active { transform: scale(0.97); }
+    .btn-wvc {
+      background: #10b981;
+      color: #04130d;
+      border-color: #34d399;
+    }
+    .btn-wvc:hover { background: #34d399; }
+    .stage {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: calc(100vh - 64px);
+      max-height: calc(100vh - 64px);
+      background: #000;
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="badge">POPOCA TV · ${escapedQuality} · ${escapedLang}</span>
+      <span class="title">${escapedTitle}</span>
+    </div>
+    <div class="actions">
+      <a id="wvcCallbackBtn" class="btn btn-wvc" href="#">Transmitir no Web Video Caster</a>
+      <a id="wvcAndroidBtn" class="btn" href="#" style="display:none">App Android WVC</a>
+      <a id="vlcBtn" class="btn" href="#">Abrir no VLC</a>
+      <button id="fsBtn" class="btn" type="button">Tela Cheia</button>
+    </div>
+  </header>
+  <main class="stage">
+    <video id="tvPlayer" controls autoplay playsinline preload="auto"></video>
+  </main>
+  <script>
+    (function () {
+      var relSrc = ${escapedSrcJson};
+      var mediaTitle = ${escapedTitleJson};
+      var initialSec = ${startTime};
+      var absStreamUrl = window.location.origin + relSrc;
+      var player = document.getElementById('tvPlayer');
+      player.src = absStreamUrl;
+
+      player.addEventListener('loadedmetadata', function () {
+        if (initialSec > 2 && isFinite(player.duration) && player.duration > initialSec + 5 && relSrc.indexOf('seek=') === -1) {
+          try { player.currentTime = initialSec; } catch (e) {}
+        }
+      }, { once: true });
+
+      var wvcUrl = 'wvc-x-callback://open?url=' + encodeURIComponent(absStreamUrl) + '&title=' + encodeURIComponent(mediaTitle);
+      document.getElementById('wvcCallbackBtn').setAttribute('href', wvcUrl);
+
+      if (/android/i.test(navigator.userAgent || '')) {
+        var stripped = absStreamUrl.replace(/^https?:\\/\\//i, '');
+        var scheme = absStreamUrl.indexOf('https://') === 0 ? 'https' : 'http';
+        var intentUrl = 'intent://' + stripped + '#Intent;package=com.instantbits.cast.webvideo;scheme=' + scheme + ';S.title=' + encodeURIComponent(mediaTitle) + ';end';
+        var androidBtn = document.getElementById('wvcAndroidBtn');
+        androidBtn.style.display = 'inline-flex';
+        androidBtn.setAttribute('href', intentUrl);
+      }
+
+      document.getElementById('vlcBtn').setAttribute('href', 'vlc://' + absStreamUrl);
+      document.getElementById('fsBtn').addEventListener('click', function () {
+        if (player.requestFullscreen) player.requestFullscreen();
+        else if (player.webkitEnterFullscreen) player.webkitEnterFullscreen();
+      });
+    })();
+  </script>
+</body>
+</html>`);
+  });
+
+  // Servidor Frontend Vite em Dev (com HMR / Live Reload integrado) ou Estático em Prod
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req: Request, res: Response) => {
@@ -404,7 +851,9 @@ async function bootstrap() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Popoca] Servidor de streaming ativo na porta ${PORT}`);
+    const lanIp = getLocalLanIp();
+    console.log(`[Popoca] Servidor Live Reload (Vite + P2P) ativo em: http://localhost:${PORT}`);
+    console.log(`[Popoca] Rede Wi-Fi Local (Smart TV / Web Video Caster): http://${lanIp}:${PORT}`);
   });
 }
 

@@ -298,6 +298,7 @@ export const letterboxdService = {
         username: existing.username || 'Cinéfilo Popoca',
         handle: existing.handle || '@cinfilo',
         letterboxdUsername: existing.letterboxdUsername || '',
+        bannerUrl: existing.bannerUrl || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1600&auto=format&fit=crop&q=80',
         avatarUrl:
           existing.avatarUrl ||
           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -311,6 +312,7 @@ export const letterboxdService = {
       username: 'Cinéfilo Popoca',
       handle: '@cinfilo',
       letterboxdUsername: '',
+      bannerUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1600&auto=format&fit=crop&q=80',
       avatarUrl:
         'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       bio: 'Amante de cinema, séries e maratonas em streaming ultra-leve Popoca.',
