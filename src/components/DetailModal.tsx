@@ -673,15 +673,29 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   type="button"
                   onClick={() => {
                     const resumePoint = canResumeSavedPoint ? savedHistoryEntry!.currentTime : 0;
-                    const chosen = pickBestStableTorrent();
-                    if (chosen) {
-                      handlePlaySelectedTorrent(chosen, resumePoint);
-                    } else if (isSeriesOrAnime && currentEpisode) {
+                    if (isSeriesOrAnime && currentEpisode) {
                       handlePlayEpisode(currentEpisode);
+                      return;
                     }
+                    const chosen = pickBestStableTorrent() || {
+                      id: `direct-${hydratedMedia.id}`,
+                      title: `${hydratedMedia.title} [${selectedQuality !== 'all' ? selectedQuality : '1080p'} WEB-DL ${selectedAudio === 'original' ? 'Original' : 'Dublado PT-BR'}]`,
+                      magnetUri: '',
+                      infoHash: '',
+                      quality: selectedQuality !== 'all' ? selectedQuality : '1080p',
+                      format: 'WEB-DL',
+                      seeds: 1200,
+                      peers: 180,
+                      sizeBytes: 2100000000,
+                      sizeFormatted: '2.10 GB',
+                      isPortugueseAudio: selectedAudio !== 'original',
+                      source: 'Popoca P2P Brasil',
+                      trackerPriority,
+                      directUrl: hydratedMedia.stream_url || `/api/stream/${hydratedMedia.id}`
+                    };
+                    handlePlaySelectedTorrent(chosen, resumePoint);
                   }}
-                  disabled={isLoadingTorrents && torrents.length === 0}
-                  className="px-7 py-3 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black font-extrabold text-sm rounded-full shadow-xl flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+                  className="px-7 py-3 bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black font-extrabold text-sm rounded-full shadow-xl flex items-center gap-2 active:scale-95 transition-all cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>
@@ -697,14 +711,28 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const chosen = pickBestStableTorrent();
-                      if (chosen) {
-                        handlePlaySelectedTorrent(chosen, 0);
-                      } else if (isSeriesOrAnime && currentEpisode) {
+                      if (isSeriesOrAnime && currentEpisode) {
                         handlePlayEpisode(currentEpisode);
+                        return;
                       }
+                      const chosen = pickBestStableTorrent() || {
+                        id: `direct-${hydratedMedia.id}`,
+                        title: `${hydratedMedia.title} [${selectedQuality !== 'all' ? selectedQuality : '1080p'} WEB-DL ${selectedAudio === 'original' ? 'Original' : 'Dublado PT-BR'}]`,
+                        magnetUri: '',
+                        infoHash: '',
+                        quality: selectedQuality !== 'all' ? selectedQuality : '1080p',
+                        format: 'WEB-DL',
+                        seeds: 1200,
+                        peers: 180,
+                        sizeBytes: 2100000000,
+                        sizeFormatted: '2.10 GB',
+                        isPortugueseAudio: selectedAudio !== 'original',
+                        source: 'Popoca P2P Brasil',
+                        trackerPriority,
+                        directUrl: hydratedMedia.stream_url || `/api/stream/${hydratedMedia.id}`
+                      };
+                      handlePlaySelectedTorrent(chosen, 0);
                     }}
-                    disabled={isLoadingTorrents && torrents.length === 0}
                     className="px-4 py-3 rounded-full glass-subtle border border-slate-200/80 dark:border-white/15 text-xs font-bold text-slate-800 dark:text-white/90 hover:opacity-85 flex items-center gap-1.5 transition-all cursor-pointer"
                     title="Começar a reprodução desde o início (00:00)"
                   >
@@ -717,15 +745,29 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                   type="button"
                   onClick={() => {
                     const resumePoint = canResumeSavedPoint ? savedHistoryEntry!.currentTime : 0;
-                    const chosen = pickBestStableTorrent();
-                    if (chosen) {
-                      handlePlaySelectedTorrent(chosen, resumePoint, true);
-                    } else if (isSeriesOrAnime && currentEpisode) {
+                    if (isSeriesOrAnime && currentEpisode) {
                       handlePlayEpisode(currentEpisode, true);
+                      return;
                     }
+                    const chosen = pickBestStableTorrent() || {
+                      id: `direct-${hydratedMedia.id}`,
+                      title: `${hydratedMedia.title} [${selectedQuality !== 'all' ? selectedQuality : '1080p'} WEB-DL ${selectedAudio === 'original' ? 'Original' : 'Dublado PT-BR'}]`,
+                      magnetUri: '',
+                      infoHash: '',
+                      quality: selectedQuality !== 'all' ? selectedQuality : '1080p',
+                      format: 'WEB-DL',
+                      seeds: 1200,
+                      peers: 180,
+                      sizeBytes: 2100000000,
+                      sizeFormatted: '2.10 GB',
+                      isPortugueseAudio: selectedAudio !== 'original',
+                      source: 'Popoca P2P Brasil',
+                      trackerPriority,
+                      directUrl: hydratedMedia.stream_url || `/api/stream/${hydratedMedia.id}`
+                    };
+                    handlePlaySelectedTorrent(chosen, resumePoint, true);
                   }}
-                  disabled={isLoadingTorrents && torrents.length === 0}
-                  className="px-4 py-3 rounded-full glass-subtle border border-slate-300 dark:border-white/20 text-xs font-bold text-slate-800 dark:text-white hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center gap-2 transition-all cursor-pointer shadow-md active:scale-95 disabled:opacity-50"
+                  className="px-4 py-3 rounded-full glass-subtle border border-slate-300 dark:border-white/20 text-xs font-bold text-slate-800 dark:text-white hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center gap-2 transition-all cursor-pointer shadow-md active:scale-95"
                   title="Transmitir para Smart TV, Chromecast ou Web Video Caster"
                 >
                   <Cast className="w-4 h-4 text-slate-700 dark:text-white" />

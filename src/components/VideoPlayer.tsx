@@ -328,9 +328,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [lanInfo, setLanInfo] = useState<{ lanIp: string; port: number; lanOrigin: string } | null>(null);
   const [copiedCastField, setCopiedCastField] = useState<'tv' | 'stream' | null>(null);
 
-  // Mini Player redimensionável e arrastável estilo Netflix
+  // Mini Player redimensionável e arrastável estilo Netflix (alta fluidez sem lag)
   const [miniWidth, setMiniWidth] = useState<number>(() =>
-    typeof window !== 'undefined' && window.innerWidth < 640 ? 180 : 340
+    typeof window !== 'undefined' && window.innerWidth < 640 ? 190 : 340
   );
   const [miniPos, setMiniPos] = useState<{ x: number; y: number } | null>(null);
   const miniDragRef = useRef<{
@@ -345,7 +345,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const miniResizeRef = useRef<{
     startX: number;
     origW: number;
+    origLeft: number;
+    origTop: number;
     currentW?: number;
+    lastLeft?: number;
+    lastTop?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -355,29 +359,41 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
+      // Redimensionamento estilo Netflix / Apple TV PiP (puxando a quina superior esquerda)
       if (miniResizeRef.current && containerRef.current) {
         if ('touches' in e && e.cancelable) e.preventDefault();
-        const dx = miniResizeRef.current.startX - clientX;
+        const dx = clientX - miniResizeRef.current.startX;
         const maxW = Math.min(window.innerWidth - 16, 440);
-        const nextW = Math.max(160, Math.min(maxW, miniResizeRef.current.origW + dx));
-        containerRef.current.style.width = `${nextW}px`;
-        miniResizeRef.current.currentW = nextW;
+        const targetW = Math.max(160, Math.min(maxW, miniResizeRef.current.origW - dx));
+        const deltaW = targetW - miniResizeRef.current.origW;
+        const newLeft = Math.max(8, miniResizeRef.current.origLeft - deltaW);
+        const newTop = Math.max(56, miniResizeRef.current.origTop - Math.round((deltaW * 9) / 16));
+
+        containerRef.current.style.width = `${targetW}px`;
+        containerRef.current.style.left = `${newLeft}px`;
+        containerRef.current.style.top = `${newTop}px`;
+        containerRef.current.style.right = 'auto';
+        containerRef.current.style.bottom = 'auto';
+        miniResizeRef.current.currentW = targetW;
+        miniResizeRef.current.lastLeft = newLeft;
+        miniResizeRef.current.lastTop = newTop;
         return;
       }
 
+      // Arrastar Mini Player fluido sem atraso com limites de tela estritos
       if (miniDragRef.current && containerRef.current) {
         if ('touches' in e && e.cancelable) e.preventDefault();
         const dx = clientX - miniDragRef.current.startX;
         const dy = clientY - miniDragRef.current.startY;
-        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
           miniDragRef.current.hasMoved = true;
         }
-        const currentW = miniResizeRef.current?.currentW || miniWidth;
+        const currentW = miniWidth;
         const currentH = Math.round((currentW * 9) / 16) + 38;
         const minX = 8;
         const maxX = Math.max(minX, window.innerWidth - currentW - 8);
-        const minY = 64; // Sob a barra de navegação superior
-        const maxY = Math.max(minY, window.innerHeight - currentH - 85); // Acima da barra inferior mobile
+        const minY = 56; // Sob a barra de navegação superior
+        const maxY = Math.max(minY, window.innerHeight - currentH - 72); // Acima da barra inferior mobile
 
         const newX = Math.max(minX, Math.min(maxX, miniDragRef.current.origX + dx));
         const newY = Math.max(minY, Math.min(maxY, miniDragRef.current.origY + dy));
@@ -401,12 +417,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
       if (miniResizeRef.current?.currentW) {
         setMiniWidth(miniResizeRef.current.currentW);
+        if (
+          typeof miniResizeRef.current.lastLeft === 'number' &&
+          typeof miniResizeRef.current.lastTop === 'number'
+        ) {
+          setMiniPos({ x: miniResizeRef.current.lastLeft, y: miniResizeRef.current.lastTop });
+        }
       }
       miniDragRef.current = null;
       miniResizeRef.current = null;
     };
 
-    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mousemove', handlePointerMove, { passive: false });
     window.addEventListener('mouseup', handlePointerUp);
     window.addEventListener('touchmove', handlePointerMove, { passive: false });
     window.addEventListener('touchend', handlePointerUp);
@@ -577,11 +599,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     ]
   );
 
-  // Carrega a lista de legendas reais ao abrir o menu
+  // Carrega a lista de legendas reais automaticamente em background para estarem prontas instantaneamente
   useEffect(() => {
-    if (!showSubMenu) return;
     const fileName = liveStats?.name || '';
-    const key = `${media.imdb_id || ''}|${episode?.seasonNumber || 0}|${episode?.episodeNumber || 0}|${fileName}`;
+    const key = `${media.imdb_id || media.id || ''}|${episode?.seasonNumber || 0}|${episode?.episodeNumber || 0}|${fileName}`;
     if (loadedSubtitleKeyRef.current === key) return;
     loadedSubtitleKeyRef.current = key;
 
@@ -596,7 +617,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         fileName: fileName || undefined
       })
       .then((tracks) => {
-        if (active) setSubtitleTracks(tracks);
+        if (active) setSubtitleTracks(tracks || []);
+      })
+      .catch(() => {
+        if (active) setSubtitleTracks([]);
       })
       .finally(() => {
         if (active) setSubtitlesLoading(false);
@@ -604,7 +628,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => {
       active = false;
     };
-  }, [showSubMenu, liveStats?.name, media.imdb_id, media.media_type, episode?.seasonNumber, episode?.episodeNumber]);
+  }, [liveStats?.name, media.imdb_id, media.id, media.media_type, episode?.seasonNumber, episode?.episodeNumber]);
 
   // Baixa e processa os cues WebVTT da legenda escolhida para renderização fixa na parte inferior da tela
   useEffect(() => {
@@ -814,26 +838,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPreferredQuality(newQuality);
     api.setPreferredQuality(newQuality);
 
-    if (currentTorrent.quality === newQuality) return;
+    if (currentTorrent.quality === newQuality) {
+      showToastNotification(`Qualidade atual já é ${newQuality}`, 2200);
+      return;
+    }
 
-    const sameLangAndQuality = torrentsPool
-      .filter(
-        (t) =>
-          t.quality === newQuality &&
-          t.isPortugueseAudio === currentTorrent.isPortugueseAudio
-      )
-      .sort((a, b) => (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds));
+    // 1. Tenta encontrar fonte da mesma qualidade e mesmo idioma
+    let candidates = torrentsPool.filter(
+      (t) => t.quality === newQuality && t.isPortugueseAudio === currentTorrent.isPortugueseAudio
+    );
 
-    if (sameLangAndQuality.length === 0) {
+    // 2. Se não houver no mesmo idioma, busca qualquer fonte dessa qualidade
+    if (candidates.length === 0) {
+      candidates = torrentsPool.filter((t) => t.quality === newQuality);
+    }
+
+    if (candidates.length === 0) {
       showToastNotification(
-        `Nenhuma semente ${newQuality} disponível em ${currentTorrent.isPortugueseAudio ? 'Português' : 'Áudio Original'
-        } para este título.`,
-        3200
+        `Nenhuma fonte ${newQuality} encontrada para este título.`,
+        3000
       );
       return;
     }
 
-    const bestTarget = sameLangAndQuality[0];
+    const sorted = [...candidates].sort((a, b) => (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds));
+    const bestTarget = sorted[0];
     setCurrentTorrent(bestTarget);
     setRetryAttempts(0);
     reconnectStreamAtTime(lastKnownTimeRef.current, !userPausedRef.current, bestTarget, audioTrackOverride);
@@ -1533,17 +1562,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       style={
         isMini
           ? {
-              width: `${miniWidth}px`,
-              left: miniPos ? `${miniPos.x}px` : undefined,
-              top: miniPos ? `${miniPos.y}px` : undefined,
-              right: miniPos ? 'auto' : undefined,
-              bottom: miniPos ? 'auto' : undefined
-            }
+            width: `${miniWidth}px`,
+            left: miniPos ? `${miniPos.x}px` : undefined,
+            top: miniPos ? `${miniPos.y}px` : undefined,
+            right: miniPos ? 'auto' : undefined,
+            bottom: miniPos ? 'auto' : undefined,
+            touchAction: 'none'
+          }
           : undefined
       }
       className={
         isMini
-          ? 'dark fixed z-[70] right-3 bottom-[96px] md:right-6 md:bottom-6 rounded-2xl overflow-hidden bg-black text-white select-none shadow-[0_24px_60px_rgba(0,0,0,0.65)] ring-1 ring-white/20 group/mini animate-in fade-in slide-in-from-bottom-4 duration-300'
+          ? `dark fixed z-[70] ${miniPos ? '' : 'right-3 bottom-[96px] md:right-6 md:bottom-6'} rounded-2xl overflow-hidden bg-black text-white select-none shadow-[0_24px_60px_rgba(0,0,0,0.75)] ring-1 ring-white/20 group/mini touch-none`
           : 'dark fixed inset-0 z-50 bg-black text-white flex items-center justify-center select-none overflow-hidden'
       }
     >
@@ -1725,10 +1755,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {activeSubtitleText && (
         <div
           className={`pointer-events-none absolute inset-x-3 sm:inset-x-8 z-30 flex justify-center transition-all duration-300 ${isMini
-              ? 'bottom-11'
-              : showControls
-                ? 'bottom-28 sm:bottom-32'
-                : 'bottom-4 sm:bottom-6'
+            ? 'bottom-11'
+            : showControls
+              ? 'bottom-28 sm:bottom-32'
+              : 'bottom-4 sm:bottom-6'
             }`}
         >
           <div
@@ -1744,20 +1774,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* Mini Player flutuante redimensionável e arrastável estilo Netflix */}
       {isMini && (
         <>
-          {/* Handle de redimensionamento na quinha superior esquerda (igual Netflix) */}
+          {/* Único Handle de Redimensionamento na Quina Superior Esquerda Estilo Apple/Netflix */}
           <div
             onMouseDown={(e) => {
               e.stopPropagation();
-              miniResizeRef.current = { startX: e.clientX, origW: miniWidth };
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniResizeRef.current = {
+                  startX: e.clientX,
+                  origW: rect.width,
+                  origLeft: rect.left,
+                  origTop: rect.top
+                };
+              }
             }}
             onTouchStart={(e) => {
               e.stopPropagation();
-              miniResizeRef.current = { startX: e.touches[0].clientX, origW: miniWidth };
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (rect) {
+                miniResizeRef.current = {
+                  startX: e.touches[0].clientX,
+                  origW: rect.width,
+                  origLeft: rect.left,
+                  origTop: rect.top
+                };
+              }
             }}
-            className="absolute top-0 left-0 w-8 h-8 z-50 cursor-nwse-resize flex items-start justify-start p-1.5 text-white/70 hover:text-white transition-colors touch-none"
-            title="Arraste na quinha para redimensionar o mini player"
+            className="absolute top-0 left-0 w-8 h-8 z-50 cursor-nwse-resize flex items-start justify-start p-1.5 text-white/80 hover:text-white transition-colors touch-none group/handle select-none"
+            title="Arraste na quina para redimensionar o mini player"
+            aria-label="Redimensionar mini player"
           >
-            <div className="w-3.5 h-3.5 border-t-2 border-l-2 border-white/80 rounded-tl shadow-lg" />
+            <div className="w-3 h-3 border-t-2 border-l-2 border-white/90 rounded-tl shadow-md group-hover/handle:scale-110 transition-transform" />
           </div>
 
           <div
@@ -1771,7 +1818,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   startY: e.clientY,
                   origX: rect.left,
                   origY: rect.top,
-                  hasMoved: false
+                  hasMoved: false,
+                  lastX: rect.left,
+                  lastY: rect.top
                 };
               }
             }}
@@ -1785,11 +1834,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   startY: e.touches[0].clientY,
                   origX: rect.left,
                   origY: rect.top,
-                  hasMoved: false
+                  hasMoved: false,
+                  lastX: rect.left,
+                  lastY: rect.top
                 };
               }
             }}
-            className="absolute inset-x-0 top-0 aspect-video cursor-move select-none"
+            className="absolute inset-x-0 top-0 aspect-video cursor-move select-none touch-none"
           >
             {isBuffering && !playbackError && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/35 pointer-events-none">
@@ -1808,35 +1859,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </button>
               </div>
             )}
-
-            {/* Handle de Redimensionamento na Quina Estilo Netflix */}
-            <div
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                const rect = containerRef.current?.getBoundingClientRect();
-                if (rect) {
-                  miniResizeRef.current = {
-                    startX: e.clientX,
-                    origW: rect.width
-                  };
-                }
-              }}
-              onTouchStart={(e) => {
-                e.stopPropagation();
-                const rect = containerRef.current?.getBoundingClientRect();
-                if (rect) {
-                  miniResizeRef.current = {
-                    startX: e.touches[0].clientX,
-                    origW: rect.width
-                  };
-                }
-              }}
-              className="absolute top-1.5 left-1.5 z-40 w-7 h-7 flex items-center justify-center cursor-nwse-resize text-white/70 hover:text-white group/handle touch-none active:scale-110 transition-transform"
-              title="Arrastar na quina para redimensionar"
-              aria-label="Redimensionar mini player"
-            >
-              <div className="w-3 h-3 border-t-2 border-l-2 border-white/80 rounded-tl-sm group-hover/handle:border-white shadow-sm" />
-            </div>
 
             <div
               onClick={() => {
@@ -1899,7 +1921,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   startY: e.clientY,
                   origX: rect.left,
                   origY: rect.top,
-                  hasMoved: false
+                  hasMoved: false,
+                  lastX: rect.left,
+                  lastY: rect.top
                 };
               }
             }}
@@ -1913,11 +1937,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   startY: e.touches[0].clientY,
                   origX: rect.left,
                   origY: rect.top,
-                  hasMoved: false
+                  hasMoved: false,
+                  lastX: rect.left,
+                  lastY: rect.top
                 };
               }
             }}
-            className="flex items-center gap-2 pl-2.5 pr-1.5 py-1.5 bg-[#0D1016] cursor-move select-none"
+            className="flex items-center gap-2 pl-2.5 pr-1.5 py-1.5 bg-[#0D1016] cursor-move select-none touch-none"
           >
             <button
               type="button"
@@ -2085,9 +2111,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* Painel Superior de Controles Estilo Apple TV Liquid Glass */}
           <div
-            className={`absolute top-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${
-              showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
+            className={`absolute top-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
           >
             {/* Lado Esquerdo: Fechar (X) e Picture-in-Picture */}
             <div className="flex items-center gap-2 sm:gap-3">
@@ -2151,9 +2176,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* CONTROLES CENTRAIS APPLE TV (10 - || - 10) */}
           <div
-            className={`absolute inset-0 pointer-events-none flex items-center justify-center gap-8 sm:gap-14 z-30 transition-opacity duration-300 ${
-              showControls && !isBuffering && !playbackError ? 'opacity-100' : 'opacity-0'
-            }`}
+            className={`absolute inset-0 pointer-events-none flex items-center justify-center gap-8 sm:gap-14 z-30 transition-opacity duration-300 ${showControls && !isBuffering && !playbackError ? 'opacity-100' : 'opacity-0'
+              }`}
           >
             {/* Retroceder 10 segundos Apple TV */}
             <button
@@ -2161,15 +2185,43 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={(e) => {
                 e.stopPropagation();
                 skipSeconds(-10);
+                triggerHud('-10s', 'replay');
               }}
-              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer"
+              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer flex items-center justify-center"
               aria-label="Voltar 10 segundos"
               title="Voltar 10s"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 sm:w-12 sm:h-12">
-                <path d="M11 4H4v7" />
-                <path d="M4 11a9 9 0 1 1 2.2 6.5" />
-                <text x="12" y="14.8" fill="currentColor" stroke="none" fontSize="6.2" fontWeight="700" textAnchor="middle" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+              <svg viewBox="0 0 24 24" fill="none" className="w-11 h-11 sm:w-14 sm:h-14">
+                <path
+                  d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M3 3v5h5"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8.2 11.2 L9.6 10.2 V16.2 M8.2 16.2 H11"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <rect
+                  x="12.6"
+                  y="10.2"
+                  width="4.4"
+                  height="6"
+                  rx="2.2"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
               </svg>
             </button>
 
@@ -2202,67 +2254,73 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={(e) => {
                 e.stopPropagation();
                 skipSeconds(10);
+                triggerHud('+10s', 'forward');
               }}
-              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer"
+              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer flex items-center justify-center"
               aria-label="Avançar 10 segundos"
               title="Avançar 10s"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 sm:w-12 sm:h-12">
-                <path d="M13 4h7v7" />
-                <path d="M20 11a9 9 0 1 0-2.2 6.5" />
-                <text x="12" y="14.8" fill="currentColor" stroke="none" fontSize="6.2" fontWeight="700" textAnchor="middle" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+              <svg viewBox="0 0 24 24" fill="none" className="w-11 h-11 sm:w-14 sm:h-14">
+                <path
+                  d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.99 6.74 2.74L21 8"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M21 3v5h-5"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8.2 11.2 L9.6 10.2 V16.2 M8.2 16.2 H11"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <rect
+                  x="12.6"
+                  y="10.2"
+                  width="4.4"
+                  height="6"
+                  rx="2.2"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
               </svg>
             </button>
           </div>
 
           {/* Painel Inferior de Controles Apple TV Liquid Glass */}
           <div
-            className={`absolute bottom-0 left-0 right-0 p-4 sm:p-7 bg-gradient-to-t from-black/95 via-black/60 to-transparent flex flex-col gap-2 z-40 transition-opacity duration-300 ${
-              showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
+            className={`absolute bottom-0 left-0 right-0 p-4 sm:p-7 bg-gradient-to-t from-black/95 via-black/60 to-transparent flex flex-col gap-2 z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+              }`}
           >
-            {/* Linha Superior: Título/Subtítulo à esquerda & Botão Circular Cast/AirPlay à direita */}
-            <div className="flex items-end justify-between gap-3 mb-1">
-              <div className="min-w-0 flex-1">
-                {episode ? (
-                  <>
-                    <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
-                      {media.title}: Temporada {episode.seasonNumber}
-                    </p>
-                    <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
-                      {episode.title || `Episódio ${episode.episodeNumber}`}
-                    </h2>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
-                      {media.release_date ? media.release_date.slice(0, 4) : 'Popoca'} · {currentTorrent.quality}
-                    </p>
-                    <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
-                      {media.title}
-                    </h2>
-                  </>
-                )}
-              </div>
-
-              {/* Botão Circular Liquid Glass Apple TV: AirPlay / Cast */}
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    closeAllMenus();
-                    setShowCastModal(true);
-                  }}
-                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-2xl border border-white/35 text-white flex items-center justify-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] transition-all hover:scale-105 active:scale-95 cursor-pointer"
-                  aria-label="Transmitir ou AirPlay"
-                  title="Transmitir para Smart TV, AirPlay ou Web Video Caster"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 sm:w-7 sm:h-7">
-                    <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
-                    <polygon points="12,15 17,21 7,21" fill="currentColor" stroke="none" />
-                  </svg>
-                </button>
-              </div>
+            {/* Título & Informações do Filme/Episódio (Sem botão gigante por cima!) */}
+            <div className="min-w-0 flex-1 mb-1">
+              {episode ? (
+                <>
+                  <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
+                    {media.title}: Temporada {episode.seasonNumber}
+                  </p>
+                  <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
+                    {episode.title || `Episódio ${episode.episodeNumber}`}
+                  </h2>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
+                    {media.release_date ? media.release_date.slice(0, 4) : 'Popoca'} · {currentTorrent.quality}
+                  </p>
+                  <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
+                    {media.title}
+                  </h2>
+                </>
+              )}
             </div>
 
             {/* Scrubber Minimalista */}
@@ -2313,39 +2371,61 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   onClick={() => {
                     if (selectedSubtitleId !== 'off') {
                       setSelectedSubtitleId('off');
+                      triggerHud('Legendas Desativadas', 'subtitles');
                     } else if (subtitleTracks.length > 0) {
-                      setSelectedSubtitleId(subtitleTracks[0].id);
+                      const pt = subtitleTracks.find(
+                        (s) =>
+                          s.lang?.toLowerCase().includes('por') ||
+                          s.label?.toLowerCase().includes('portug')
+                      );
+                      const chosenId = pt ? pt.id : subtitleTracks[0].id;
+                      setSelectedSubtitleId(chosenId);
+                      const t = subtitleTracks.find((s) => s.id === chosenId);
+                      triggerHud(`Legenda: ${t?.label || 'Ativada'}`, 'subtitles');
                     } else {
                       setShowMobileSettingsSheet(true);
                     }
                   }}
-                  className={`p-1.5 rounded-full transition-colors ${
-                    selectedSubtitleId !== 'off'
+                  className={`p-1.5 rounded-full transition-colors cursor-pointer ${selectedSubtitleId !== 'off'
                       ? 'bg-white text-black'
                       : 'text-white/70 hover:text-white hover:bg-white/10'
-                  }`}
+                    }`}
                   title="Legendas"
                   aria-label="Legendas"
                 >
                   <Subtitles className="w-4 h-4" />
                 </button>
 
-                {/* Ajustes */}
+                {/* Ajustes (Qualidade, Áudio, Velocidade, Legendas) */}
                 <button
                   type="button"
                   onClick={() => setShowMobileSettingsSheet(true)}
-                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-                  title="Ajustes (Áudio, Qualidade, Velocidade)"
+                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Ajustes de Reprodução"
                   aria-label="Ajustes"
                 >
                   <SlidersHorizontal className="w-4 h-4" />
+                </button>
+
+                {/* Transmissão / Cast Padrão (Substitui o botão gigante flutuante) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAllMenus();
+                    setShowCastModal(true);
+                  }}
+                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Transmitir para TV / Web Video Caster / AirPlay"
+                  aria-label="Transmitir para TV"
+                >
+                  <Cast className="w-4 h-4" />
                 </button>
 
                 {onNextEpisode && (
                   <button
                     type="button"
                     onClick={onNextEpisode}
-                    className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                     title="Próximo Episódio"
                     aria-label="Próximo Episódio"
                   >
@@ -2357,7 +2437,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <button
                   type="button"
                   onClick={toggleFullscreen}
-                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   title={isFullscreen ? 'Sair da Tela Cheia' : 'Tela Cheia'}
                   aria-label="Tela Cheia"
                 >
@@ -2372,17 +2452,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           </div>
 
-          {/* MOBILE BOTTOM SHEET (Painel Deslizante estilo Netflix para Celular) */}
+          {/* PAINEL DE AJUSTES UNIVERSAL (Mobile Bottom Sheet / Desktop Centered Glass Dialog) */}
           {showMobileSettingsSheet && (
             <div
               onClick={() => setShowMobileSettingsSheet(false)}
-              className="sm:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end animate-in fade-in duration-200"
+              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end sm:justify-center sm:items-center p-0 sm:p-4 animate-in fade-in duration-200"
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="w-full bg-[#121620] border-t border-white/20 rounded-t-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-300 text-white"
+                className="w-full sm:max-w-md bg-[#11151E] border-t sm:border border-white/20 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 space-y-4 max-h-[88vh] overflow-y-auto animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 text-white shadow-2xl"
               >
-                {/* Header do Sheet */}
+                {/* Header do Painel */}
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="w-4 h-4 text-white" />
@@ -2390,15 +2470,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                   <button
                     onClick={() => setShowMobileSettingsSheet(false)}
-                    className="p-1 rounded-full bg-white/10 text-white"
+                    className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Qualidade */}
+                {/* Qualidade Fixa (720p, 1080p Padrão, 4K) */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Qualidade</label>
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Qualidade de Vídeo</label>
                   <div className="grid grid-cols-3 gap-2">
                     {FIXED_QUALITY_OPTIONS.map((q) => (
                       <button
@@ -2406,15 +2486,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         onClick={() => {
                           handleSelectFixedQuality(q.id);
                         }}
-                        className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
-                          preferredQuality === q.id
-                            ? 'bg-white text-black border-white'
-                            : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-colors flex flex-col items-center justify-center gap-0.5 cursor-pointer ${preferredQuality === q.id
+                            ? 'bg-white text-black border-white shadow-md'
+                            : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                          }`}
                       >
-                        {q.label}
+                        <span>{q.label}</span>
+                        <span className={`text-[10px] font-normal ${preferredQuality === q.id ? 'text-black/70' : 'text-white/50'}`}>
+                          {q.badge}
+                        </span>
                       </button>
                     ))}
+                    {!subtitlesLoading && subtitleTracks.length === 0 && (
+                      <p className="text-[11px] text-white/40 italic py-1 px-1">
+                        Nenhuma legenda externa necessária (áudio em português integrado).
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -2426,15 +2513,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <button
                         key={spd}
                         onClick={() => changeSpeed(spd)}
-                        className={`py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
-                          playbackSpeed === spd
+                        className={`py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${playbackSpeed === spd
                             ? 'bg-white text-black border-white'
                             : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                          }`}
                       >
                         {spd}x
                       </button>
                     ))}
+                    {!subtitlesLoading && subtitleTracks.length === 0 && (
+                      <p className="text-[11px] text-white/40 italic py-1 px-1">
+                        Nenhuma legenda externa necessária (áudio em português integrado).
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -2444,22 +2535,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleSwitchLanguageMode(true, undefined)}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
-                        currentTorrent.isPortugueseAudio
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${currentTorrent.isPortugueseAudio
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                      }`}
+                        }`}
                     >
                       <Volume2 className="w-3.5 h-3.5" />
                       <span>Dublado PT-BR</span>
                     </button>
                     <button
                       onClick={() => handleSwitchLanguageMode(false, undefined)}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
-                        !currentTorrent.isPortugueseAudio
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${!currentTorrent.isPortugueseAudio
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                      }`}
+                        }`}
                     >
                       <Volume2 className="w-3.5 h-3.5" />
                       <span>Original / Inglês</span>
@@ -2470,21 +2559,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         onClick={() => handleSwitchLanguageMode(true, 0)}
-                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
-                          audioTrackOverride === 0
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${audioTrackOverride === 0
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/70 border-white/10'
-                        }`}
+                          }`}
                       >
                         Dual: Forçar Faixa 1
                       </button>
                       <button
                         onClick={() => handleSwitchLanguageMode(true, 1)}
-                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
-                          audioTrackOverride === 1
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${audioTrackOverride === 1
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/70 border-white/10'
-                        }`}
+                          }`}
                       >
                         Dual: Forçar Faixa 2
                       </button>
@@ -2492,17 +2579,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   )}
                 </div>
 
-                {/* Legendas */}
+                {/* Legendas Oficiais */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Legendas</label>
-                  <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Legendas</label>
+                    {subtitlesLoading && (
+                      <span className="text-[10px] text-white/50 flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Buscando...
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
                     <button
                       onClick={() => setSelectedSubtitleId('off')}
-                      className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
-                        selectedSubtitleId === 'off'
+                      className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${selectedSubtitleId === 'off'
                           ? 'bg-white text-black font-bold border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                      }`}
+                        }`}
                     >
                       Desativadas (Padrão)
                     </button>
@@ -2510,15 +2603,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <button
                         key={tr.id}
                         onClick={() => setSelectedSubtitleId(tr.id)}
-                        className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
-                          selectedSubtitleId === tr.id
+                        className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${selectedSubtitleId === tr.id
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                          }`}
                       >
                         {tr.label}
                       </button>
                     ))}
+                    {!subtitlesLoading && subtitleTracks.length === 0 && (
+                      <p className="text-[11px] text-white/40 italic py-1 px-1">
+                        Nenhuma legenda externa necessária (áudio em português integrado).
+                      </p>
+                    )}
                   </div>
 
                   <div className="pt-1">
@@ -2534,11 +2631,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <button
                           key={sz}
                           onClick={() => changeSubtitleSize(sz)}
-                          className={`py-1 rounded-lg text-xs border ${
-                            subtitleSize === sz
+                          className={`py-1 rounded-lg text-xs border ${subtitleSize === sz
                               ? 'bg-white text-black font-bold border-white'
                               : 'bg-white/5 text-white/70 border-white/10'
-                          }`}
+                            }`}
                         >
                           {lbl}
                         </button>
