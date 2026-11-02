@@ -315,7 +315,7 @@ export class TorrentEngine {
         trackers: selectedTrackers,
         dht: this.sharedDht || true,
         tracker: true,
-        connections: activePriority === 'ultra-speed' ? 180 : 140,
+        connections: activePriority === 'ultra-speed' ? 80 : 60,
         uploads: 6, // Essencial para desbloqueio rápido (tit-for-tat unchoke) junto aos seeds!
         verify: false
       };
