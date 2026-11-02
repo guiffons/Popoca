@@ -23,6 +23,12 @@ import { db } from './server/database.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+process.on('uncaughtException', (err) => {
+  console.error('[Popoca] Erro ignorado para não derrubar o servidor:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Popoca] Promessa rejeitada ignorada:', reason);
+});
 
 function getLocalLanIp(): string {
   try {
