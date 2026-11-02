@@ -29,6 +29,71 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('[Popoca] Promessa rejeitada ignorada:', reason);
 });
+// ===== Limpeza automática do cache de torrents =====
+// O /tmp do Render grátis tem limite de 2GB. Este trecho apaga o que está parado.
+const CACHE_DIR = path.join(os.tmpdir(), 'popoca-cache');
+const CACHE_LIMIT_BYTES = 1.2 * 1024 * 1024 * 1024; // acima disso começa a apagar
+const CACHE_TARGET_BYTES = 0.6 * 1024 * 1024 * 1024; // apaga até chegar perto disso
+const IDLE_DELETE_MS = 10 * 60 * 1000; // pasta parada há 10 min é apagada
+const IDLE_SAFE_MS = 2 * 60 * 1000; // pasta mexida há menos de 2 min nunca é apagada
+
+function folderInfo(dir: string): { size: number; newest: number } {
+  let size = 0;
+  let newest = 0;
+  const walk = (d: string) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          walk(p);
+        } else {
+          const st = fs.statSync(p);
+          size += st.blocks * 512; // uso real em disco
+          newest = Math.max(newest, st.mtimeMs);
+        }
+      } catch {}
+    }
+  };
+  try {
+    walk(dir);
+  } catch {}
+  return { size, newest };
+}
+
+function cleanTorrentCache() {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) return;
+    const now = Date.now();
+    const folders = fs
+      .readdirSync(CACHE_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => {
+        const p = path.join(CACHE_DIR, e.name);
+        return { p, ...folderInfo(p) };
+      })
+      .sort((a, b) => a.newest - b.newest); // mais antigas primeiro
+
+    let total = folders.reduce((s, f) => s + f.size, 0);
+
+    for (const f of folders) {
+      const idle = now - f.newest;
+      const tooOld = idle > IDLE_DELETE_MS;
+      const overLimit = total > CACHE_LIMIT_BYTES && total > CACHE_TARGET_BYTES && idle > IDLE_SAFE_MS;
+      if (tooOld || overLimit) {
+        try {
+          fs.rmSync(f.p, { recursive: true, force: true });
+          total -= f.size;
+          console.log(`[Popoca] Cache limpo: ${path.basename(f.p)} (${Math.round(f.size / 1048576)} MB)`);
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+cleanTorrentCache();
+setInterval(cleanTorrentCache, 3 * 60 * 1000);
+// ===== Fim da limpeza =====
+
 
 function getLocalLanIp(): string {
   try {
