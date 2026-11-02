@@ -2497,11 +2497,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         </span>
                       </button>
                     ))}
-                    {!subtitlesLoading && subtitleTracks.length === 0 && (
-                      <p className="text-[11px] text-white/40 italic py-1 px-1">
-                        Nenhuma legenda externa necessária (áudio em português integrado).
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -2521,11 +2516,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         {spd}x
                       </button>
                     ))}
-                    {!subtitlesLoading && subtitleTracks.length === 0 && (
-                      <p className="text-[11px] text-white/40 italic py-1 px-1">
-                        Nenhuma legenda externa necessária (áudio em português integrado).
-                      </p>
-                    )}
                   </div>
                 </div>
 
