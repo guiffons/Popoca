@@ -366,7 +366,7 @@ export class TorrentEngine {
             this.stopWireOptimizer(hash);
             reject(new Error('P2P_PEER_TIMEOUT: Nenhuma semente respondeu a tempo.'));
           }
-        }, 14000);
+        }, 25000);
 
         engine.on('ready', () => {
           if (resolved) return;
