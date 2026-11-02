@@ -339,10 +339,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     origX: number;
     origY: number;
     hasMoved: boolean;
+    lastX?: number;
+    lastY?: number;
   } | null>(null);
   const miniResizeRef = useRef<{
     startX: number;
     origW: number;
+    currentW?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -352,29 +355,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
-      if (miniResizeRef.current) {
+      if (miniResizeRef.current && containerRef.current) {
+        if ('touches' in e && e.cancelable) e.preventDefault();
         const dx = miniResizeRef.current.startX - clientX;
-        const maxW = Math.min(window.innerWidth - 20, 500);
-        const nextW = Math.max(140, Math.min(maxW, miniResizeRef.current.origW + dx));
-        setMiniWidth(nextW);
+        const maxW = Math.min(window.innerWidth - 16, 440);
+        const nextW = Math.max(160, Math.min(maxW, miniResizeRef.current.origW + dx));
+        containerRef.current.style.width = `${nextW}px`;
+        miniResizeRef.current.currentW = nextW;
         return;
       }
 
-      if (miniDragRef.current) {
+      if (miniDragRef.current && containerRef.current) {
+        if ('touches' in e && e.cancelable) e.preventDefault();
         const dx = clientX - miniDragRef.current.startX;
         const dy = clientY - miniDragRef.current.startY;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
           miniDragRef.current.hasMoved = true;
         }
-        const maxX = Math.max(10, window.innerWidth - miniWidth - 10);
-        const maxY = Math.max(10, window.innerHeight - 120);
-        const newX = Math.max(10, Math.min(maxX, miniDragRef.current.origX + dx));
-        const newY = Math.max(10, Math.min(maxY, miniDragRef.current.origY + dy));
-        setMiniPos({ x: newX, y: newY });
+        const currentW = miniResizeRef.current?.currentW || miniWidth;
+        const currentH = Math.round((currentW * 9) / 16) + 38;
+        const minX = 8;
+        const maxX = Math.max(minX, window.innerWidth - currentW - 8);
+        const minY = 64; // Sob a barra de navegação superior
+        const maxY = Math.max(minY, window.innerHeight - currentH - 85); // Acima da barra inferior mobile
+
+        const newX = Math.max(minX, Math.min(maxX, miniDragRef.current.origX + dx));
+        const newY = Math.max(minY, Math.min(maxY, miniDragRef.current.origY + dy));
+
+        containerRef.current.style.left = `${newX}px`;
+        containerRef.current.style.top = `${newY}px`;
+        containerRef.current.style.right = 'auto';
+        containerRef.current.style.bottom = 'auto';
+        miniDragRef.current.lastX = newX;
+        miniDragRef.current.lastY = newY;
       }
     };
 
     const handlePointerUp = () => {
+      if (
+        miniDragRef.current?.hasMoved &&
+        typeof miniDragRef.current.lastX === 'number' &&
+        typeof miniDragRef.current.lastY === 'number'
+      ) {
+        setMiniPos({ x: miniDragRef.current.lastX, y: miniDragRef.current.lastY });
+      }
+      if (miniResizeRef.current?.currentW) {
+        setMiniWidth(miniResizeRef.current.currentW);
+      }
       miniDragRef.current = null;
       miniResizeRef.current = null;
     };
@@ -1527,12 +1554,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center animate-in fade-in zoom-in-95 duration-150"
         >
           <div className="glass-dropdown px-5 py-3 rounded-2xl border border-white/20 shadow-2xl flex items-center gap-3 text-white backdrop-blur-2xl">
-            {hudFeedback.icon === 'forward' && <RotateCw className="w-5 h-5 text-emerald-400" />}
-            {hudFeedback.icon === 'replay' && <RotateCcw className="w-5 h-5 text-emerald-400" />}
+            {hudFeedback.icon === 'forward' && <RotateCw className="w-5 h-5 text-white" />}
+            {hudFeedback.icon === 'replay' && <RotateCcw className="w-5 h-5 text-white" />}
             {hudFeedback.icon === 'volume' && <Volume2 className="w-5 h-5 text-white" />}
-            {hudFeedback.icon === 'mute' && <VolumeX className="w-5 h-5 text-rose-400" />}
+            {hudFeedback.icon === 'mute' && <VolumeX className="w-5 h-5 text-white/70" />}
             {hudFeedback.icon === 'fullscreen' && <Maximize className="w-5 h-5 text-white" />}
-            {hudFeedback.icon === 'subtitles' && <Subtitles className="w-5 h-5 text-emerald-400" />}
+            {hudFeedback.icon === 'subtitles' && <Subtitles className="w-5 h-5 text-white" />}
             {hudFeedback.icon === 'play' && <Play className="w-5 h-5 fill-current text-white" />}
             {hudFeedback.icon === 'pause' && <Pause className="w-5 h-5 fill-current text-white" />}
             <span className="text-sm font-extrabold tracking-wide">{hudFeedback.text}</span>
@@ -1542,56 +1569,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {/* Toast de Rede / Qualidade / Idioma */}
       {failoverToast && !isMini && (
-        <div className="absolute top-20 z-50 glass-dropdown px-4 py-2.5 rounded-2xl border border-emerald-500/30 shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-top duration-300 text-xs font-semibold text-white max-w-lg text-center">
-          <Zap className="w-4 h-4 text-emerald-400 shrink-0 animate-pulse" />
+        <div className="absolute top-20 z-50 glass-dropdown px-4 py-2.5 rounded-2xl border border-white/20 shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-top duration-300 text-xs font-semibold text-white max-w-lg text-center">
+          <Zap className="w-4 h-4 text-white shrink-0 animate-pulse" />
           <span>{failoverToast}</span>
         </div>
       )}
 
-      {/* Controles Grandes Centrais Touch para Celular / Tablet */}
-      {!isMini && showControls && (
-        <div className="sm:hidden absolute inset-0 z-30 flex items-center justify-center gap-7 pointer-events-none animate-in fade-in duration-200">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              skipSeconds(-10);
-            }}
-            className="w-12 h-12 rounded-full bg-black/65 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center shadow-2xl pointer-events-auto active:scale-90 transition-transform cursor-pointer"
-            aria-label="Voltar 10 segundos"
-          >
-            <RotateCcw className="w-5 h-5 text-white/90" />
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlay();
-            }}
-            className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.35)] pointer-events-auto active:scale-90 transition-transform cursor-pointer"
-            aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
-          >
-            {isPlaying ? (
-              <Pause className="w-7 h-7 fill-current" />
-            ) : (
-              <Play className="w-7 h-7 fill-current ml-1" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              skipSeconds(10);
-            }}
-            className="w-12 h-12 rounded-full bg-black/65 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center shadow-2xl pointer-events-auto active:scale-90 transition-transform cursor-pointer"
-            aria-label="Avançar 10 segundos"
-          >
-            <RotateCw className="w-5 h-5 text-white/90" />
-          </button>
-        </div>
-      )}
 
       {/* Vídeo HTML5 Principal */}
       <video
@@ -1826,6 +1809,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
             )}
 
+            {/* Handle de Redimensionamento na Quina Estilo Netflix */}
+            <div
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                const rect = containerRef.current?.getBoundingClientRect();
+                if (rect) {
+                  miniResizeRef.current = {
+                    startX: e.clientX,
+                    origW: rect.width
+                  };
+                }
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                const rect = containerRef.current?.getBoundingClientRect();
+                if (rect) {
+                  miniResizeRef.current = {
+                    startX: e.touches[0].clientX,
+                    origW: rect.width
+                  };
+                }
+              }}
+              className="absolute top-1.5 left-1.5 z-40 w-7 h-7 flex items-center justify-center cursor-nwse-resize text-white/70 hover:text-white group/handle touch-none active:scale-110 transition-transform"
+              title="Arrastar na quina para redimensionar"
+              aria-label="Redimensionar mini player"
+            >
+              <div className="w-3 h-3 border-t-2 border-l-2 border-white/80 rounded-tl-sm group-hover/handle:border-white shadow-sm" />
+            </div>
+
             <div
               onClick={() => {
                 if (!miniDragRef.current?.hasMoved) {
@@ -1851,7 +1863,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   e.stopPropagation();
                   onExpand?.();
                 }}
-                className="absolute top-2 left-6 p-1 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
+                className="absolute top-2 left-9 p-1 rounded-full bg-black/45 hover:bg-black/70 backdrop-blur-md transition-colors"
                 aria-label="Expandir player"
                 title="Expandir"
               >
@@ -1872,7 +1884,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
 
             <div className="absolute bottom-0 inset-x-0 h-[3px] bg-white/20 pointer-events-none">
-              <div className="h-full bg-emerald-400 transition-[width] duration-200" style={{ width: `${progressPercent}%` }} />
+              <div className="h-full bg-white transition-[width] duration-200" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
 
@@ -2035,13 +2047,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           <div className="flex items-center gap-2 truncate">
                             <span className="font-bold">{alt.quality}</span>
                             {alt.isPortugueseAudio ? (
-                              <span className="text-[10px] text-emerald-400 font-bold">Dublado PT-BR</span>
+                              <span className="text-[10px] text-white/90 font-bold">Dublado PT-BR</span>
                             ) : (
                               <span className="text-[10px] text-white/50">Original</span>
                             )}
                             <span className="text-[10px] text-white/40 truncate">{alt.source}</span>
                           </div>
-                          <span className="text-[10px] text-emerald-400 font-mono shrink-0">
+                          <span className="text-[10px] text-white/80 font-mono shrink-0">
                             {alt.seeds} seeds
                           </span>
                         </button>
@@ -2055,7 +2067,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       setRetryAttempts(0);
                       handleManualNetworkRetry(false);
                     }}
-                    className="flex-1 py-2.5 px-4 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5"
+                    className="flex-1 py-2.5 px-4 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isRetryingNetwork ? 'animate-spin' : ''}`} />
                     <span>Continuar daqui ({formatTime(lastKnownTimeRef.current)})</span>
@@ -2071,521 +2083,231 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           )}
 
-          {/* Painel Superior de Controles */}
+          {/* Painel Superior de Controles Estilo Apple TV Liquid Glass */}
           <div
-            className={`absolute top-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
-              }`}
+            className={`absolute top-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-b from-black/80 via-black/30 to-transparent flex items-center justify-between z-40 transition-opacity duration-300 ${
+              showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
           >
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 mr-2 sm:mr-4">
-              {onMinimize ? (
-                <button
-                  onClick={handleMinimize}
-                  className="p-1.5 sm:p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
-                  aria-label="Minimizar player"
-                  title="Minimizar e continuar navegando"
-                >
-                  <ChevronDown className="w-5 h-5" />
-                </button>
-              ) : (
-                <button
-                  onClick={onClose}
-                  className="p-1.5 sm:p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors shrink-0"
-                  aria-label="Voltar"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              )}
-              <div className="min-w-0 flex-1">
-                <h3 className="text-xs sm:text-sm md:text-base font-bold text-white truncate max-w-[170px] xs:max-w-[240px] sm:max-w-md">
-                  {displayTitle}
-                </h3>
-                <div className="hidden sm:flex items-center gap-2 text-[11px] text-white/60 flex-wrap">
-                  <span className="font-bold text-white">{currentTorrent.quality} Fixo</span>
-                  <span aria-hidden="true">·</span>
-                  <span
-                    className={`font-semibold ${currentTorrent.isPortugueseAudio ? 'text-emerald-400' : 'text-sky-300'
-                      }`}
-                  >
-                    {currentTorrent.isPortugueseAudio ? 'Dublado PT-BR' : 'Áudio Original'}
-                  </span>
-                  <span aria-hidden="true" className="hidden sm:inline">·</span>
-                  <span className="hidden sm:inline text-white/50 truncate">{currentTorrent.source}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Controles Superiores Direitos: Painel de Rede + Fontes (Desktop) */}
-            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-              <div className="hidden sm:block relative">
-                <button
-                  onClick={() => {
-                    const next = !showNetworkPanel;
-                    closeAllMenus();
-                    setShowNetworkPanel(next);
-                  }}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all ${showNetworkPanel
-                      ? 'bg-emerald-500 text-black font-bold border-emerald-400 shadow-lg'
-                      : 'glass-subtle hover:bg-white/15 border-white/15 text-white'
-                    }`}
-                  title="Abrir Painel de Controle de Rede P2P em tempo real"
-                >
-                  <span className="relative flex h-2 w-2">
-                    <span
-                      className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${showNetworkPanel
-                          ? 'bg-black'
-                          : liveStats?.isLowSpeed
-                            ? 'bg-amber-400'
-                            : 'bg-emerald-400'
-                        }`}
-                    />
-                    <span
-                      className={`relative inline-flex rounded-full h-2 w-2 ${showNetworkPanel
-                          ? 'bg-black'
-                          : liveStats?.isLowSpeed
-                            ? 'bg-amber-400'
-                            : 'bg-emerald-500'
-                        }`}
-                    />
-                  </span>
-                  <Users className="w-3.5 h-3.5" />
-                  <span className="font-bold">{connectedPeersCount} peers</span>
-                  <span className="hidden md:inline opacity-75">
-                    · {formatTransferSpeed(currentTransferSpeed)}
-                  </span>
-                </button>
-
-                {showNetworkPanel && (
-                  <div className="absolute right-0 top-11 w-80 sm:w-96 glass-dropdown rounded-2xl p-4 border border-white/15 shadow-2xl z-50 space-y-3.5 text-left animate-in fade-in">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                      <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-emerald-400" />
-                        <span className="text-xs font-extrabold text-white uppercase tracking-wider">
-                          Painel de Rede P2P
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3" />
-                        {preferredQuality} Travado
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
-                        <div className="text-[10px] text-white/50">Peers Conectados</div>
-                        <div className="text-sm font-extrabold font-mono text-emerald-400 mt-0.5">
-                          {connectedPeersCount}
-                          <span className="text-[10px] text-white/50 font-normal ml-1">
-                            ({activePeersCount})
-                          </span>
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
-                        <div className="text-[10px] text-white/50">Velocidade</div>
-                        <div className="text-sm font-extrabold font-mono text-white mt-0.5">
-                          {formatTransferSpeed(currentTransferSpeed)}
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08]">
-                        <div className="text-[10px] text-white/50">Cache Sessão</div>
-                        <div className="text-sm font-extrabold font-mono text-emerald-300 mt-0.5">
-                          {formatCachedBytes(idbSnapshot.cachedBytes)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="text-[11px] font-bold text-white/70 flex items-center justify-between">
-                        <span>Prioridade de Trackers</span>
-                        {liveStats && liveStats.autoRetryCount > 0 && (
-                          <span className="text-[10px] font-mono text-amber-300">
-                            Re-tries: {liveStats.autoRetryCount}
-                          </span>
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        {TRACKER_PRIORITY_OPTIONS.map((opt) => {
-                          const active = trackerPriority === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => handleChangeTrackerPriority(opt.id)}
-                              className={`w-full text-left px-2.5 py-2 rounded-xl border text-xs transition-all flex items-center justify-between gap-2 ${active
-                                  ? 'bg-white text-black font-bold border-white shadow-sm'
-                                  : 'bg-white/[0.03] text-white/80 border-white/[0.06] hover:bg-white/10'
-                                }`}
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate">{opt.label}</div>
-                                <div
-                                  className={`text-[10px] truncate ${active ? 'text-black/70 font-normal' : 'text-white/45'
-                                    }`}
-                                >
-                                  {opt.desc}
-                                </div>
-                              </div>
-                              {active && <Check className="w-3.5 h-3.5 shrink-0 stroke-[3]" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleManualNetworkRetry(false)}
-                        disabled={isRetryingNetwork}
-                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-60"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isRetryingNetwork ? 'animate-spin' : ''}`} />
-                        <span>Forçar Re-try Peers</span>
-                      </button>
-
-                      {sameQualityCount > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleManualNetworkRetry(true)}
-                          disabled={isRetryingNetwork}
-                          className="flex-1 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/15 flex items-center justify-center gap-1.5 transition-all active:scale-95 disabled:opacity-60"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Outra Seed {preferredQuality}</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Lista Completa de Fontes Separadas por Idioma (Desktop) */}
-              {torrentsPool.length > 1 && (
-                <div className="hidden sm:block relative">
-                  <button
-                    onClick={() => {
-                      const next = !showSourcesMenu;
-                      closeAllMenus();
-                      setShowSourcesMenu(next);
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle hover:bg-white/15 border border-white/10 text-xs font-medium text-white transition-colors"
-                    title="Trocar semente manualmente"
-                  >
-                    <Layers className="w-3.5 h-3.5 text-white/70" />
-                    <span className="hidden sm:inline">Seeds</span>
-                    <span className="text-[10px] px-1 rounded bg-white/10 text-white/70">
-                      {torrentsPool.length}
-                    </span>
-                  </button>
-
-                  {showSourcesMenu && (
-                    <div className="absolute right-0 top-11 w-76 sm:w-80 glass-dropdown rounded-2xl p-2 border border-white/15 shadow-2xl z-50 animate-in fade-in">
-                      <div className="text-[11px] font-semibold text-white/55 px-2 py-1 flex items-center justify-between">
-                        <span>Sementes Disponíveis</span>
-                        <span className="text-emerald-400 font-mono text-[10px]">
-                          Mantém {formatTime(currentTime)}
-                        </span>
-                      </div>
-                      <div className="space-y-1 mt-1 max-h-60 overflow-y-auto pr-0.5">
-                        {[...torrentsPool]
-                          .sort(
-                            (a, b) =>
-                              (b.isPortugueseAudio ? 1 : 0) - (a.isPortugueseAudio ? 1 : 0) ||
-                              (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds)
-                          )
-                          .map((t) => {
-                            const isCur = t.id === currentTorrent.id;
-                            return (
-                              <button
-                                key={t.id}
-                                onClick={() => handleSelectAlternativeTorrent(t)}
-                                className={`w-full text-left p-2 rounded-xl text-xs transition-colors flex items-center justify-between gap-2 ${isCur
-                                    ? 'bg-white text-black font-bold shadow-md'
-                                    : 'text-white/80 hover:bg-white/10'
-                                  }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-bold">{t.quality}</span>
-                                    {t.isPortugueseAudio ? (
-                                      <span
-                                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${isCur
-                                            ? 'bg-emerald-600 text-white'
-                                            : 'bg-emerald-500/20 text-emerald-400'
-                                          }`}
-                                      >
-                                        Dublado PT-BR
-                                      </span>
-                                    ) : (
-                                      <span
-                                        className={`text-[9px] px-1.5 py-0.2 rounded font-medium ${isCur ? 'bg-black/15 text-black' : 'bg-white/10 text-white/60'
-                                          }`}
-                                      >
-                                        Original / Inglês
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[10px] opacity-60 font-mono truncate mt-0.5">
-                                    {t.source} · {t.sizeFormatted}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1 font-mono text-[11px] shrink-0">
-                                  {isCur ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : `${t.seeds}s`}
-                                </div>
-                              </button>
-                            );
-                          })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Botão Transmitir para TV / Web Video Caster / Chromecast */}
+            {/* Lado Esquerdo: Fechar (X) e Picture-in-Picture */}
+            <div className="flex items-center gap-2 sm:gap-3">
               <button
-                type="button"
-                onClick={() => {
-                  closeAllMenus();
-                  setShowCastModal(true);
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle hover:bg-white/15 border border-white/15 text-xs font-bold text-white transition-colors cursor-pointer"
-                title="Transmitir vídeo para Smart TV, Web Video Caster ou Chromecast"
+                onClick={onClose}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
+                aria-label="Fechar"
+                title="Fechar"
               >
-                <Cast className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Transmitir</span>
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              <button
+                onClick={togglePictureInPicture}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
+                aria-label="Picture-in-Picture"
+                title="Picture-in-Picture"
+              >
+                <PictureInPicture className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
               {onMinimize && (
                 <button
-                  onClick={onClose}
-                  className="p-2 rounded-xl glass-panel hover:bg-white/10 text-white transition-colors"
-                  aria-label="Fechar player"
-                  title="Fechar"
+                  onClick={handleMinimize}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur-xl border border-white/20 text-white flex items-center justify-center transition-all cursor-pointer"
+                  aria-label="Minimizar para mini player"
+                  title="Minimizar e continuar navegando"
                 >
-                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               )}
             </div>
+
+            {/* Lado Direito: Slider de Volume Apple TV */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/40 hover:bg-black/60 border border-white/20 backdrop-blur-xl transition-all">
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="w-16 sm:w-28 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-white"
+                  aria-label="Volume"
+                />
+                <button
+                  onClick={toggleMute}
+                  className="text-white hover:text-white/80 transition-colors cursor-pointer"
+                  aria-label={isMuted ? 'Ativar som' : 'Silenciar'}
+                >
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
 
-          {/* CONTROLES CENTRAIS EM DESTAQUE (Ideal para Celular e Toque) */}
+          {/* CONTROLES CENTRAIS APPLE TV (10 - || - 10) */}
           <div
-            className={`absolute inset-0 pointer-events-none flex items-center justify-center gap-6 sm:gap-12 z-30 transition-opacity duration-300 ${
+            className={`absolute inset-0 pointer-events-none flex items-center justify-center gap-8 sm:gap-14 z-30 transition-opacity duration-300 ${
               showControls && !isBuffering && !playbackError ? 'opacity-100' : 'opacity-0'
             }`}
           >
+            {/* Retroceder 10 segundos Apple TV */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 skipSeconds(-10);
               }}
-              className="pointer-events-auto p-3.5 sm:p-4 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md text-white border border-white/20 active:scale-90 transition-all shadow-xl"
+              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer"
               aria-label="Voltar 10 segundos"
               title="Voltar 10s"
             >
-              <RotateCcw className="w-6 h-6 sm:w-8 sm:h-8" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 sm:w-12 sm:h-12">
+                <path d="M11 4H4v7" />
+                <path d="M4 11a9 9 0 1 1 2.2 6.5" />
+                <text x="12" y="14.8" fill="currentColor" stroke="none" fontSize="6.2" fontWeight="700" textAnchor="middle" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+              </svg>
             </button>
 
+            {/* Play / Pause Principal Apple TV */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 togglePlay();
               }}
-              className="pointer-events-auto p-5 sm:p-6 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_35px_rgba(16,185,129,0.55)] active:scale-95 transition-all flex items-center justify-center ring-4 ring-white/20"
+              className="pointer-events-auto p-3 text-white hover:scale-105 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
               aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
               title={isPlaying ? 'Pausar' : 'Reproduzir'}
             >
               {isPlaying ? (
-                <Pause className="w-8 h-8 sm:w-10 sm:h-10 fill-current" />
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-12 h-12 sm:w-16 sm:h-16">
+                  <rect x="5" y="4" width="4.5" height="16" rx="1.5" />
+                  <rect x="14.5" y="4" width="4.5" height="16" rx="1.5" />
+                </svg>
               ) : (
-                <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-current ml-1" />
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-12 h-12 sm:w-16 sm:h-16 ml-1">
+                  <polygon points="6,4 20,12 6,20" />
+                </svg>
               )}
             </button>
 
+            {/* Avançar 10 segundos Apple TV */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 skipSeconds(10);
               }}
-              className="pointer-events-auto p-3.5 sm:p-4 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md text-white border border-white/20 active:scale-90 transition-all shadow-xl"
+              className="pointer-events-auto p-2 text-white/90 hover:text-white active:scale-90 transition-all cursor-pointer"
               aria-label="Avançar 10 segundos"
               title="Avançar 10s"
             >
-              <RotateCw className="w-6 h-6 sm:w-8 sm:h-8" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="w-9 h-9 sm:w-12 sm:h-12">
+                <path d="M13 4h7v7" />
+                <path d="M20 11a9 9 0 1 0-2.2 6.5" />
+                <text x="12" y="14.8" fill="currentColor" stroke="none" fontSize="6.2" fontWeight="700" textAnchor="middle" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+              </svg>
             </button>
           </div>
 
-          {/* Painel Inferior de Controles + Barra de Buffer Visual via Cache IndexedDB */}
+          {/* Painel Inferior de Controles Apple TV Liquid Glass */}
           <div
-            className={`absolute bottom-0 left-0 right-0 p-3 sm:p-6 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col gap-2.5 z-40 transition-opacity duration-300 ${
+            className={`absolute bottom-0 left-0 right-0 p-4 sm:p-7 bg-gradient-to-t from-black/95 via-black/60 to-transparent flex flex-col gap-2 z-40 transition-opacity duration-300 ${
               showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
           >
-            {/* BARRA DE PROGRESSO VISUAL DE BUFFER OTIMIZADA PARA DEDO/TOUCH */}
-            <div className="space-y-1">
-              <div className="relative w-full group/scrubber cursor-pointer py-3.5 sm:py-2.5 flex items-center touch-none">
-                <div
-                  className="absolute left-0 right-0 h-2 sm:h-1.5 bg-zinc-600/80 rounded-full overflow-hidden pointer-events-none border border-white/10"
-                  title="Cinza: segmentos pendentes · Verde: segmentos em cache"
-                >
-                  {idbSnapshot.segments.map((seg, index) => (
-                    <div
-                      key={`${seg.startByte}-${index}`}
-                      className="absolute top-0 bottom-0 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.55)] transition-all duration-200"
-                      style={{
-                        left: `${seg.startPercent}%`,
-                        width: `${Math.max(0.4, seg.endPercent - seg.startPercent)}%`
-                      }}
-                    />
-                  ))}
-                </div>
-
-                <div
-                  className="absolute left-0 h-2 sm:h-1.5 bg-white/35 rounded-l-full pointer-events-none z-10 transition-all duration-75"
-                  style={{ width: `${progressPercent}%` }}
-                />
-
-                <div
-                  className="absolute w-4 h-4 sm:w-3.5 sm:h-3.5 rounded-full bg-white ring-2 ring-emerald-400 shadow-lg pointer-events-none z-20 -translate-x-1/2 transition-transform group-hover/scrubber:scale-125"
-                  style={{ left: `${progressPercent}%` }}
-                />
-
-                <input
-                  type="range"
-                  min={0}
-                  max={totalEffectiveDuration > 0 ? totalEffectiveDuration : 100}
-                  step={0.5}
-                  value={currentTime}
-                  onChange={handleSeek}
-                  className="w-full h-10 sm:h-5 -top-3 sm:-top-1 opacity-0 cursor-pointer accent-emerald-400 absolute inset-0 z-30"
-                  aria-label="Barra de progresso e buffer do vídeo"
-                />
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] font-mono text-white/60 px-0.5">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-                    Buffer: {idbSnapshot.cachedPercent}% ({formatCachedBytes(idbSnapshot.cachedBytes)})
-                  </span>
-                  <span className="hidden sm:flex items-center gap-1.5 text-zinc-400">
-                    <span className="w-2 h-2 rounded-full bg-zinc-500 inline-block" />
-                    Pendente: {Math.max(0, 100 - idbSnapshot.cachedPercent)}%
-                  </span>
-                </div>
-                <span className="hidden md:inline text-white/45">
-                  Qualidade fixa {preferredQuality} · {currentTorrent.isPortugueseAudio ? 'Áudio PT-BR' : 'Áudio Original'}
-                </span>
-              </div>
-            </div>
-
-            {/* Linha de Botões e Informações de Reprodução */}
-            <div className="flex items-center justify-between gap-2 sm:gap-3 flex-wrap">
-              <div className="flex items-center gap-1.5 sm:gap-3.5 flex-wrap">
-                <button
-                  onClick={togglePlay}
-                  className="hidden sm:flex p-2 sm:p-2.5 rounded-full bg-white hover:bg-slate-200 text-black transition-all transform active:scale-90"
-                  aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
-                >
-                  {isPlaying ? (
-                    <Pause className="w-5 h-5 fill-current" />
-                  ) : (
-                    <Play className="w-5 h-5 fill-current ml-0.5" />
-                  )}
-                </button>
-
-                <button
-                  onClick={() => skipSeconds(-10)}
-                  className="hidden sm:flex p-2 text-white/70 hover:text-white transition-colors"
-                  title="Voltar 10s"
-                  aria-label="Voltar 10 segundos"
-                >
-                  <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-
-                <button
-                  onClick={() => skipSeconds(10)}
-                  className="hidden sm:flex p-2 text-white/70 hover:text-white transition-colors"
-                  title="Avançar 10s"
-                  aria-label="Avançar 10 segundos"
-                >
-                  <RotateCw className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-
-                {onNextEpisode && (
-                  <button
-                    onClick={onNextEpisode}
-                    className="p-2 text-white/70 hover:text-white transition-colors"
-                    title="Próximo Episódio"
-                    aria-label="Próximo Episódio"
-                  >
-                    <SkipForward className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
+            {/* Linha Superior: Título/Subtítulo à esquerda & Botão Circular Cast/AirPlay à direita */}
+            <div className="flex items-end justify-between gap-3 mb-1">
+              <div className="min-w-0 flex-1">
+                {episode ? (
+                  <>
+                    <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
+                      {media.title}: Temporada {episode.seasonNumber}
+                    </p>
+                    <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
+                      {episode.title || `Episódio ${episode.episodeNumber}`}
+                    </h2>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs sm:text-sm font-medium text-white/70 truncate">
+                      {media.release_date ? media.release_date.slice(0, 4) : 'Popoca'} · {currentTorrent.quality}
+                    </p>
+                    <h2 className="text-base sm:text-2xl font-extrabold text-white tracking-tight truncate mt-0.5">
+                      {media.title}
+                    </h2>
+                  </>
                 )}
-
-                {/* Controle de Volume */}
-                <div className="flex items-center gap-2 group/vol">
-                  <button
-                    onClick={toggleMute}
-                    className="p-2 text-white/70 hover:text-white transition-colors"
-                    aria-label={isMuted ? 'Ativar som' : 'Silenciar'}
-                  >
-                    {isMuted || volume === 0 ? (
-                      <VolumeX className="w-4 h-4 sm:w-5 sm:h-5" />
-                    ) : (
-                      <Volume2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                    )}
-                  </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    className="hidden sm:block w-16 md:w-20 h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-white"
-                  />
-                </div>
-
-                {/* Timestamp */}
-                <div className="text-[11px] sm:text-xs font-mono text-white/85">
-                  <span>{formatTime(currentTime)}</span>
-                  <span className="text-white/35"> / </span>
-                  <span>{formatTime(totalEffectiveDuration)}</span>
-                </div>
               </div>
 
-              {/* Lado Direito MOBILE (sm:hidden) — Enxuto, sem transbordar! */}
-              <div className="sm:hidden flex items-center gap-1.5 shrink-0">
-                {/* Botão rápido Dublado PT-BR / Original */}
-                <button
-                  type="button"
-                  onClick={() => handleSwitchLanguageMode(!currentTorrent.isPortugueseAudio, undefined)}
-                  className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors ${currentTorrent.isPortugueseAudio
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                      : 'bg-white/10 text-white/80 border-white/15'
-                    }`}
-                  title="Alternar Áudio Dublado PT-BR / Original"
-                >
-                  {currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Orig'}
-                </button>
-
-                {/* Botão Transmitir Mobile */}
+              {/* Botão Circular Liquid Glass Apple TV: AirPlay / Cast */}
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     closeAllMenus();
                     setShowCastModal(true);
                   }}
-                  className="p-1.5 text-white/80 hover:text-white"
-                  title="Transmitir para TV"
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-black/45 hover:bg-black/65 backdrop-blur-2xl border border-white/35 text-white flex items-center justify-center shadow-[0_8px_32px_rgba(0,0,0,0.5)] transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  aria-label="Transmitir ou AirPlay"
+                  title="Transmitir para Smart TV, AirPlay ou Web Video Caster"
                 >
-                  <Cast className="w-4 h-4 text-emerald-400" />
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 sm:w-7 sm:h-7">
+                    <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
+                    <polygon points="12,15 17,21 7,21" fill="currentColor" stroke="none" />
+                  </svg>
                 </button>
+              </div>
+            </div>
 
-                {/* Botão Legendas Rápido */}
+            {/* Scrubber Minimalista */}
+            <div className="relative w-full group/scrubber cursor-pointer py-2.5 flex items-center touch-none">
+              <div className="absolute left-0 right-0 h-1 sm:h-1 bg-white/20 rounded-full overflow-hidden pointer-events-none group-hover/scrubber:h-1.5 transition-all">
+                {idbSnapshot.segments.map((seg, index) => (
+                  <div
+                    key={`${seg.startByte}-${index}`}
+                    className="absolute top-0 bottom-0 bg-white/40 transition-all duration-200"
+                    style={{
+                      left: `${seg.startPercent}%`,
+                      width: `${Math.max(0.4, seg.endPercent - seg.startPercent)}%`
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div
+                className="absolute left-0 h-1 sm:h-1 bg-white rounded-l-full pointer-events-none z-10 group-hover/scrubber:h-1.5 transition-all duration-75"
+                style={{ width: `${progressPercent}%` }}
+              />
+
+              <div
+                className="absolute w-3.5 h-3.5 sm:w-3 sm:h-3 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.7)] pointer-events-none z-20 -translate-x-1/2 transition-transform group-hover/scrubber:scale-125"
+                style={{ left: `${progressPercent}%` }}
+              />
+
+              <input
+                type="range"
+                min={0}
+                max={totalEffectiveDuration > 0 ? totalEffectiveDuration : 100}
+                step={0.5}
+                value={currentTime}
+                onChange={handleSeek}
+                className="w-full h-8 -top-3 opacity-0 cursor-pointer absolute inset-0 z-30"
+                aria-label="Barra de progresso"
+              />
+            </div>
+
+            {/* Linha Inferior de Horários & Ações */}
+            <div className="flex items-center justify-between text-xs sm:text-[13px] font-mono text-white/80 px-0.5">
+              <span>{formatTime(currentTime)}</span>
+
+              <div className="flex items-center gap-2 sm:gap-3">
+                {/* Legendas */}
                 <button
                   type="button"
                   onClick={() => {
@@ -2597,370 +2319,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       setShowMobileSettingsSheet(true);
                     }
                   }}
-                  className={`p-1.5 transition-colors ${selectedSubtitleId !== 'off' ? 'text-emerald-400' : 'text-white/70'
-                    }`}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    selectedSubtitleId !== 'off'
+                      ? 'bg-white text-black'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
                   title="Legendas"
+                  aria-label="Legendas"
                 >
                   <Subtitles className="w-4 h-4" />
                 </button>
 
-                {/* Botão de Opções / Ajustes (Abre Bottom Sheet nativo) */}
+                {/* Ajustes */}
                 <button
                   type="button"
                   onClick={() => setShowMobileSettingsSheet(true)}
-                  className="p-1.5 text-white/80 hover:text-white"
-                  title="Opções (Qualidade, Velocidade, Áudio)"
+                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  title="Ajustes (Áudio, Qualidade, Velocidade)"
+                  aria-label="Ajustes"
                 >
                   <SlidersHorizontal className="w-4 h-4" />
                 </button>
 
+                {onNextEpisode && (
+                  <button
+                    type="button"
+                    onClick={onNextEpisode}
+                    className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                    title="Próximo Episódio"
+                    aria-label="Próximo Episódio"
+                  >
+                    <SkipForward className="w-4 h-4" />
+                  </button>
+                )}
+
                 {/* Tela Cheia */}
                 <button
                   type="button"
                   onClick={toggleFullscreen}
-                  className="p-1.5 text-white/80 hover:text-white"
-                  title="Tela Cheia"
+                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+                  title={isFullscreen ? 'Sair da Tela Cheia' : 'Tela Cheia'}
+                  aria-label="Tela Cheia"
                 >
                   {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </button>
-              </div>
 
-              {/* Lado Direito DESKTOP (hidden sm:flex) — Todas as ferramentas detalhadas */}
-              <div className="hidden sm:flex items-center gap-1.5 sm:gap-2">
-                {/* SELETOR DE IDIOMA / FAIXA DE ÁUDIO (PT-BR vs Original + Dual Áudio) */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      const next = !showAudioMenu;
-                      closeAllMenus();
-                      setShowAudioMenu(next);
-                    }}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 border ${currentTorrent.isPortugueseAudio
-                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
-                        : 'glass-subtle text-white/85 border-white/15 hover:bg-white/10'
-                      }`}
-                    title="Selecionar Idioma do Áudio (Português / Original)"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <span>{currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Inglês'}</span>
-                  </button>
-
-                  {showAudioMenu && (
-                    <div className="absolute right-0 bottom-12 w-64 glass-dropdown rounded-2xl p-2 border border-white/15 shadow-2xl z-50 space-y-1">
-                      <div className="text-[11px] font-semibold text-white/50 px-2 py-1">
-                        Áudio & Dublagem
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleSwitchLanguageMode(true, undefined)}
-                        disabled={ptAvailableCount === 0 && !currentTorrent.isPortugueseAudio}
-                        className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition-colors flex items-center justify-between disabled:opacity-40 ${currentTorrent.isPortugueseAudio && audioTrackOverride === undefined
-                            ? 'bg-emerald-500 text-black font-bold'
-                            : 'text-white/85 hover:bg-white/10'
-                          }`}
-                      >
-                        <span>Dublado PT-BR (Padrão)</span>
-                        {currentTorrent.isPortugueseAudio && audioTrackOverride === undefined && (
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        )}
-                      </button>
-
-                      {currentTorrent.isPortugueseAudio && (
-                        <div className="pt-1 border-t border-white/10 space-y-1">
-                          <div className="text-[10px] text-white/45 px-2 pt-0.5">
-                            Ajuste fino Dual Áudio (MKV):
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSwitchLanguageMode(true, 0)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors flex items-center justify-between ${audioTrackOverride === 0
-                                ? 'bg-white text-black font-bold'
-                                : 'text-white/75 hover:bg-white/10'
-                              }`}
-                          >
-                            <span>Forçar Faixa 1 do arquivo</span>
-                            {audioTrackOverride === 0 && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSwitchLanguageMode(true, 1)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors flex items-center justify-between ${audioTrackOverride === 1
-                                ? 'bg-white text-black font-bold'
-                                : 'text-white/75 hover:bg-white/10'
-                              }`}
-                          >
-                            <span>Forçar Faixa 2 do arquivo</span>
-                            {audioTrackOverride === 1 && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="pt-1 border-t border-white/10">
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchLanguageMode(false, undefined)}
-                          disabled={origAvailableCount === 0 && currentTorrent.isPortugueseAudio}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition-colors flex items-center justify-between disabled:opacity-40 ${!currentTorrent.isPortugueseAudio
-                              ? 'bg-white text-black font-bold'
-                              : 'text-white/80 hover:bg-white/10'
-                            }`}
-                        >
-                          <span>Original / Inglês (Legendado)</span>
-                          {!currentTorrent.isPortugueseAudio && (
-                            <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* SELETOR DE 3 QUALIDADES FIXAS (720p · 1080p Padrão · 4K) */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      const next = !showQualityMenu;
-                      closeAllMenus();
-                      setShowQualityMenu(next);
-                    }}
-                    className="px-2.5 py-1.5 rounded-xl glass-subtle hover:bg-white/15 border border-white/15 text-xs font-bold text-white transition-colors flex items-center gap-1.5"
-                    title="Escolher Qualidade Fixa (720p / 1080p / 4K)"
-                  >
-                    <SlidersHorizontal className="w-3.5 h-3.5 text-white/75" />
-                    <span>{preferredQuality}</span>
-                  </button>
-
-                  {showQualityMenu && (
-                    <div className="absolute right-0 bottom-12 w-68 glass-dropdown rounded-2xl p-2 border border-white/15 shadow-2xl z-50 space-y-1">
-                      <div className="text-[11px] font-semibold text-white/50 px-2 py-1 flex items-center justify-between">
-                        <span>Qualidade Fixa</span>
-                        <span className="text-[10px] text-emerald-400 font-mono">Sem trocar seed</span>
-                      </div>
-                      {FIXED_QUALITY_OPTIONS.map((qOpt) => {
-                        const active = preferredQuality === qOpt.id;
-                        const countInLang = torrentsPool.filter(
-                          (t) =>
-                            t.quality === qOpt.id &&
-                            t.isPortugueseAudio === currentTorrent.isPortugueseAudio
-                        ).length;
-                        return (
-                          <button
-                            key={qOpt.id}
-                            type="button"
-                            onClick={() => handleSelectFixedQuality(qOpt.id)}
-                            disabled={countInLang === 0 && !active}
-                            className={`w-full text-left px-2.5 py-2 rounded-xl text-xs transition-colors flex items-center justify-between gap-2 disabled:opacity-40 ${active
-                                ? 'bg-white text-black font-bold shadow-sm'
-                                : 'text-white/85 hover:bg-white/10'
-                              }`}
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span>{qOpt.label}</span>
-                                <span
-                                  className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${active
-                                      ? 'bg-black/15 text-black'
-                                      : 'bg-white/10 text-white/70'
-                                    }`}
-                                >
-                                  {qOpt.badge}
-                                </span>
-                              </div>
-                              <div
-                                className={`text-[10px] leading-snug mt-0.5 ${active ? 'text-black/70 font-normal' : 'text-white/45'
-                                  }`}
-                              >
-                                {qOpt.desc}
-                              </div>
-                            </div>
-                            {active ? (
-                              <Check className="w-3.5 h-3.5 shrink-0 stroke-[3]" />
-                            ) : (
-                              <span className="text-[10px] font-mono opacity-60 shrink-0">
-                                {countInLang > 0 ? `${countInLang}` : '—'}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Toggle Modo Apenas Áudio */}
-                <button
-                  onClick={() => setIsAudioOnly(!isAudioOnly)}
-                  className={`hidden sm:flex p-2 rounded-xl transition-colors items-center gap-1.5 text-xs font-medium ${isAudioOnly
-                      ? 'bg-white text-black font-bold shadow-md'
-                      : 'glass-subtle text-white/70 hover:text-white'
-                    }`}
-                  title="Modo Apenas Áudio"
-                >
-                  <Headphones className="w-4 h-4" />
-                </button>
-
-                {/* Transmitir para TV / Web Video Caster */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    closeAllMenus();
-                    setShowCastModal(true);
-                  }}
-                  className={`p-2 transition-colors cursor-pointer ${showCastModal ? 'text-emerald-400' : 'text-white/70 hover:text-white'
-                    }`}
-                  title="Transmitir para TV / Web Video Caster"
-                  aria-label="Transmitir para TV"
-                >
-                  <Cast className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-
-                {/* Picture-in-Picture Nativo */}
-                <button
-                  onClick={togglePictureInPicture}
-                  className="p-2 text-white/70 hover:text-white transition-colors"
-                  title="Picture-in-Picture"
-                  aria-label="Picture-in-Picture"
-                >
-                  <PictureInPicture className="w-4 h-4 sm:w-5 sm:h-5" />
-                </button>
-
-                {/* Seletor de Legendas (Desativadas por padrão, ancoradas na parte inferior) */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      const next = !showSubMenu;
-                      closeAllMenus();
-                      setShowSubMenu(next);
-                    }}
-                    className={`p-2 transition-colors ${selectedSubtitleId !== 'off'
-                        ? 'text-emerald-400 font-bold'
-                        : 'text-white/70 hover:text-white'
-                      }`}
-                    title="Legendas (Desativadas por padrão)"
-                    aria-label="Menu de legendas"
-                  >
-                    <Subtitles className="w-4 h-4 sm:w-5 sm:h-5" />
-                  </button>
-
-                  {showSubMenu && (
-                    <div className="absolute right-0 bottom-12 w-64 glass-dropdown rounded-xl p-1.5 border border-white/10 shadow-2xl z-50">
-                      <div className="text-[11px] font-semibold text-white/50 px-2 py-1">Legendas</div>
-                      <div className="max-h-56 overflow-y-auto space-y-0.5">
-                        <button
-                          onClick={() => {
-                            setSelectedSubtitleId('off');
-                            setShowSubMenu(false);
-                          }}
-                          className={`w-full text-left px-2 py-1.5 text-xs rounded-lg transition-colors ${selectedSubtitleId === 'off'
-                              ? 'bg-white text-black font-bold'
-                              : 'text-white/80 hover:bg-white/10'
-                            }`}
-                        >
-                          Desativadas (Padrão)
-                        </button>
-
-                        {subtitlesLoading && (
-                          <div className="flex items-center gap-2 px-2 py-2 text-xs text-white/55">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            Buscando legendas…
-                          </div>
-                        )}
-
-                        {!subtitlesLoading && subtitleTracks.length === 0 && (
-                          <div className="px-2 py-2 text-xs text-white/45">Nenhuma legenda encontrada</div>
-                        )}
-
-                        {subtitleTracks.map((track) => (
-                          <button
-                            key={track.id}
-                            onClick={() => {
-                              setSelectedSubtitleId(track.id);
-                              setShowSubMenu(false);
-                            }}
-                            title={track.release}
-                            className={`w-full text-left px-2 py-1.5 text-xs rounded-lg transition-colors ${selectedSubtitleId === track.id
-                                ? 'bg-white text-black font-bold'
-                                : 'text-white/80 hover:bg-white/10'
-                              }`}
-                          >
-                            {track.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="mt-1.5 pt-1.5 border-t border-white/10 px-1">
-                        <div className="text-[11px] font-semibold text-white/50 px-1 pb-1">Tamanho</div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {(
-                            [
-                              ['sm', 'Pequena'],
-                              ['md', 'Média'],
-                              ['lg', 'Grande']
-                            ] as Array<[SubtitleSize, string]>
-                          ).map(([size, label]) => (
-                            <button
-                              key={size}
-                              onClick={() => changeSubtitleSize(size)}
-                              className={`py-1 rounded-lg text-[11px] transition-colors ${subtitleSize === size
-                                  ? 'bg-white text-black font-bold'
-                                  : 'bg-white/[0.06] text-white/75 hover:bg-white/10'
-                                }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Seletor de Velocidade */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      const next = !showSpeedMenu;
-                      closeAllMenus();
-                      setShowSpeedMenu(next);
-                    }}
-                    className="p-1.5 sm:p-2 text-white/70 hover:text-white transition-colors text-xs font-mono"
-                    title="Velocidade de Reprodução"
-                  >
-                    {playbackSpeed}x
-                  </button>
-
-                  {showSpeedMenu && (
-                    <div className="absolute right-0 bottom-12 w-28 glass-dropdown rounded-xl p-1.5 border border-white/10 shadow-2xl z-50">
-                      {[0.75, 1, 1.25, 1.5, 2].map((spd) => (
-                        <button
-                          key={spd}
-                          onClick={() => changeSpeed(spd)}
-                          className={`w-full text-left px-2.5 py-1 text-xs rounded-lg font-mono transition-colors ${playbackSpeed === spd
-                              ? 'bg-white text-black font-bold'
-                              : 'text-white/80 hover:bg-white/10'
-                            }`}
-                        >
-                          {spd}x
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Tela Cheia */}
-                <button
-                  onClick={toggleFullscreen}
-                  className="p-2 text-white/70 hover:text-white transition-colors"
-                  title="Tela Cheia"
-                  aria-label="Alternar tela cheia"
-                >
-                  {isFullscreen ? (
-                    <Minimize className="w-4 h-4 sm:w-5 sm:h-5" />
-                  ) : (
-                    <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
-                  )}
-                </button>
+                {/* Tempo Restante Negativo (ex: -47:40) */}
+                <span className="font-mono text-white/80 ml-1">
+                  -{formatTime(Math.max(0, totalEffectiveDuration - currentTime))}
+                </span>
               </div>
             </div>
           </div>
@@ -2978,7 +2385,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 {/* Header do Sheet */}
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
                   <div className="flex items-center gap-2">
-                    <SlidersHorizontal className="w-4 h-4 text-emerald-400" />
+                    <SlidersHorizontal className="w-4 h-4 text-white" />
                     <span className="font-bold text-sm">Opções de Reprodução</span>
                   </div>
                   <button
@@ -3001,7 +2408,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         }}
                         className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors ${
                           preferredQuality === q.id
-                            ? 'bg-emerald-500 text-black border-emerald-400'
+                            ? 'bg-white text-black border-white'
                             : 'bg-white/5 text-white/80 border-white/10'
                         }`}
                       >
@@ -3039,7 +2446,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       onClick={() => handleSwitchLanguageMode(true, undefined)}
                       className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
                         currentTorrent.isPortugueseAudio
-                          ? 'bg-emerald-500 text-black border-emerald-400'
+                          ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
                       }`}
                     >
@@ -3142,7 +2549,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                 {/* Rede P2P Info */}
                 <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-white/60 font-mono">
-                  <span>Peers: <strong className="text-emerald-400">{connectedPeersCount}</strong></span>
+                  <span>Peers: <strong className="text-white">{connectedPeersCount}</strong></span>
                   <span>Velocidade: <strong className="text-white">{formatTransferSpeed(currentTransferSpeed)}</strong></span>
                 </div>
               </div>
@@ -3190,7 +2597,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 >
                   <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
                     <div>
-                      <div className="flex items-center gap-2 text-emerald-400 text-xs font-extrabold uppercase tracking-wider">
+                      <div className="flex items-center gap-2 text-white/80 text-xs font-extrabold uppercase tracking-wider">
                         <Cast className="w-4 h-4" />
                         <span>Compartilhar Tela & Stream na Rede Wi-Fi</span>
                       </div>
@@ -3200,7 +2607,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <p className="text-xs text-white/60 mt-0.5">
                         {displayTitle} · {preferredQuality} ·{' '}
                         {currentTorrent.isPortugueseAudio ? 'Dublado PT-BR' : 'Áudio Original'} · Ponto atual:{' '}
-                        <span className="font-mono text-emerald-300">{formatTime(castSeekSec)}</span>
+                        <span className="font-mono text-white">{formatTime(castSeekSec)}</span>
                       </p>
                     </div>
                     <button
@@ -3213,7 +2620,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
 
                   {/* Opção 1: Web Video Caster + QR Code */}
-                  <div className="p-4 rounded-2xl bg-white/[0.04] border border-emerald-500/25 flex flex-col sm:flex-row items-center gap-4">
+                  <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/15 flex flex-col sm:flex-row items-center gap-4">
                     <div className="w-36 h-36 rounded-2xl bg-white p-2 shrink-0 flex items-center justify-center shadow-lg">
                       <img
                         src={qrImageSrc}
@@ -3224,7 +2631,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                     <div className="flex-1 space-y-2.5 text-center sm:text-left">
                       <div className="flex items-center justify-center sm:justify-start gap-2">
-                        <Smartphone className="w-4 h-4 text-emerald-400" />
+                        <Smartphone className="w-4 h-4 text-white" />
                         <h4 className="text-sm font-extrabold">
                           1. Web Video Caster (Samsung, LG, Roku, Chromecast, DLNA)
                         </h4>
@@ -3236,7 +2643,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap pt-1">
                         <a
                           href={wvcCallbackHref}
-                          className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs inline-flex items-center gap-1.5 transition-colors"
+                          className="px-3.5 py-2 rounded-xl bg-white hover:bg-neutral-200 text-black font-extrabold text-xs inline-flex items-center gap-1.5 transition-colors"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
                           <span>Abrir Web Video Caster</span>
@@ -3257,7 +2664,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-col justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <Tv className="w-4 h-4 text-sky-400" />
+                          <Tv className="w-4 h-4 text-white" />
                           <h4 className="text-xs sm:text-sm font-extrabold">
                             2. Chromecast / AirPlay / Tela Sem Fio
                           </h4>
@@ -3280,7 +2687,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-col justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <Wifi className="w-4 h-4 text-amber-400" />
+                          <Wifi className="w-4 h-4 text-white" />
                           <h4 className="text-xs sm:text-sm font-extrabold">
                             3. Navegador da Smart TV ou VLC
                           </h4>
@@ -3299,8 +2706,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           >
                             {copiedCastField === 'tv' ? (
                               <>
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                <span className="text-emerald-300">Link TV Copiado!</span>
+                                <Check className="w-3.5 h-3.5 text-white" />
+                                <span className="text-white font-bold">Link TV Copiado!</span>
                               </>
                             ) : (
                               <>
@@ -3312,7 +2719,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                           <a
                             href={vlcHref}
-                            className="py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-extrabold inline-flex items-center justify-center"
+                            className="py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-extrabold inline-flex items-center justify-center"
                           >
                             VLC
                           </a>
@@ -3324,7 +2731,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           className="w-full py-1.5 px-2.5 rounded-xl bg-white/[0.05] hover:bg-white/10 text-[11px] font-mono text-white/75 flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           {copiedCastField === 'stream' ? (
-                            <span className="text-emerald-300 font-sans font-bold">URL Direta Copiada!</span>
+                            <span className="text-white font-sans font-bold">URL Direta Copiada!</span>
                           ) : (
                             <>
                               <Copy className="w-3 h-3 shrink-0" />

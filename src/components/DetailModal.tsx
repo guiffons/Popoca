@@ -74,20 +74,20 @@ const TRACKER_PRIORITY_OPTIONS: {
 }[] = [
     {
       id: 'pt-br-stability',
-      label: '🇧🇷 PT-BR & Estabilidade',
-      shortLabel: '🇧🇷 PT-BR Estável',
+      label: 'PT-BR & Estabilidade',
+      shortLabel: 'PT-BR Estável',
       hint: 'Prioriza trackers com maior disponibilidade dublada/dual áudio em português e seeds estáveis'
     },
     {
       id: 'ultra-speed',
-      label: '⚡ Ultra Velocidade',
-      shortLabel: '⚡ Ultra Rápido',
+      label: 'Ultra Velocidade',
+      shortLabel: 'Ultra Rápido',
       hint: 'Prioriza maior taxa de seeds por GB (WEB-DL MP4 leve) para início quase instantâneo'
     },
     {
       id: 'global-balanced',
-      label: '🌐 Global Balanceado',
-      shortLabel: '🌐 Global',
+      label: 'Global Balanceado',
+      shortLabel: 'Global',
       hint: 'Equilibra trackers internacionais e brasileiros em todas as resoluções'
     }
   ];
@@ -618,7 +618,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                     type="button"
                     onClick={() => handleSelectAudioFilter('pt-br')}
                     className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 ${selectedAudio === 'pt-br'
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm'
                         : 'text-slate-700 dark:text-white/70 hover:text-black dark:hover:text-white'
                       }`}
                   >
@@ -725,10 +725,10 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                     }
                   }}
                   disabled={isLoadingTorrents && torrents.length === 0}
-                  className="px-4 py-3 rounded-full glass-subtle border border-emerald-500/40 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center gap-2 transition-all cursor-pointer shadow-md active:scale-95 disabled:opacity-50"
+                  className="px-4 py-3 rounded-full glass-subtle border border-slate-300 dark:border-white/20 text-xs font-bold text-slate-800 dark:text-white hover:bg-slate-200/50 dark:hover:bg-white/10 flex items-center gap-2 transition-all cursor-pointer shadow-md active:scale-95 disabled:opacity-50"
                   title="Transmitir para Smart TV, Chromecast ou Web Video Caster"
                 >
-                  <Cast className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                  <Cast className="w-4 h-4 text-slate-700 dark:text-white" />
                   <span>Transmitir</span>
                 </button>
               </div>
@@ -1258,7 +1258,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
                         </span>
 
                         <span className="text-[11px] font-mono text-slate-500 dark:text-white/50">
-                          💾 {torrent.sizeFormatted}
+                          {torrent.sizeFormatted}
                         </span>
                       </div>
 

@@ -53,6 +53,7 @@ interface EngineRuntimeMeta {
   lastDownloadedBytes: number;
   lastSampleAt: number;
   smoothedSpeed: number;
+  targetFile?: TorrentStream.TorrentFile;
 }
 
 const CACHE_BASE_DIR = path.join(os.tmpdir(), 'popoca-cache');
@@ -164,7 +165,7 @@ export class TorrentEngine {
           }
           const hash = match[1].toLowerCase();
           const engine = this.enginesMap.get(hash);
-          const file = engine ? this.findMainVideoFile(engine) : null;
+          const file = engine ? (this.getActiveTargetFile(hash, engine) || this.findMainVideoFile(engine)) : null;
           if (!engine || !file) {
             res.writeHead(404).end();
             return;
@@ -174,7 +175,7 @@ export class TorrentEngine {
           const range = req.headers.range;
 
           if (!range || !range.startsWith('bytes=')) {
-            this.optimizePiecePriorities(engine, 0);
+            this.optimizePiecePriorities(engine, 0, file);
             res.writeHead(200, {
               'Content-Length': fileSize,
               'Accept-Ranges': 'bytes',
@@ -202,7 +203,7 @@ export class TorrentEngine {
             return;
           }
 
-          this.optimizePiecePriorities(engine, start);
+          this.optimizePiecePriorities(engine, start, file);
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
@@ -404,6 +405,19 @@ export class TorrentEngine {
     }
   }
 
+  getActiveTargetFile(
+    hash: string,
+    engine?: TorrentStream.TorrentEngine
+  ): TorrentStream.TorrentFile | null {
+    const eng = engine || this.enginesMap.get(hash);
+    if (!eng || !eng.files || eng.files.length === 0) return null;
+    const meta = this.runtimeMetaMap.get(hash);
+    if (meta?.targetFile && eng.files.includes(meta.targetFile)) {
+      return meta.targetFile;
+    }
+    return this.findTargetVideoFile(eng);
+  }
+
   findTargetVideoFile(
     engine: TorrentStream.TorrentEngine,
     fileIdx?: number,
@@ -411,6 +425,9 @@ export class TorrentEngine {
     episode?: number
   ): TorrentStream.TorrentFile | null {
     if (!engine.files || engine.files.length === 0) return null;
+
+    const hash = (engine as any).infoHash?.toLowerCase?.();
+    const meta = hash ? this.runtimeMetaMap.get(hash) : undefined;
 
     // 1. Se fileIdx explícito e válido for fornecido (ex: mapeado do Torrentio para série/anime)
     if (typeof fileIdx === 'number' && fileIdx >= 0 && fileIdx < engine.files.length) {
@@ -421,6 +438,7 @@ export class TorrentEngine {
         }
       }
       try { (target as any).select?.(); } catch {}
+      if (meta) meta.targetFile = target;
       return target;
     }
 
@@ -441,15 +459,25 @@ export class TorrentEngine {
       if (sNum) {
         patterns.push(new RegExp(`[sS]0*${sNum}[eE]0*${epNum}\\b`, 'i'));
         patterns.push(new RegExp(`\\b${sNum}x0*${epNum}\\b`, 'i'));
+        patterns.push(new RegExp(`[sS]eason\\s*0*${sNum}.*?[eE]0*${epNum}\\b`, 'i'));
       }
       patterns.push(new RegExp(`[eE]0*${epNum}\\b`, 'i'));
       patterns.push(new RegExp(`\\bep\\.?\\s*0*${epNum}\\b`, 'i'));
       patterns.push(new RegExp(`\\bepisode\\s*0*${epNum}\\b`, 'i'));
-      patterns.push(new RegExp(`\\b${epPadded}\\b`));
+      patterns.push(new RegExp(`\\bcap(?:itulo)?\\.?\\s*0*${epNum}\\b`, 'i'));
+      patterns.push(new RegExp(`[-_\\s\\[]0*${epNum}(?:v\\d+)?(?=[\\s_.\\]\\(]|$)`, 'i'));
       patterns.push(new RegExp(`\\b${epPadded3}\\b`));
+      patterns.push(new RegExp(`\\b${epPadded}\\b`));
+      if (epNum < 10) {
+        patterns.push(new RegExp(`\\b${epNum}\\b`));
+      }
 
       for (const pat of patterns) {
-        const found = candidateFiles.find((f) => pat.test(f.name));
+        const found = candidateFiles.find((f) => {
+          const cleanName = f.name.replace(/\b(1080p|720p|2160p|480p|h264|x264|h265|x265|hevc|10bit|aac)\b/gi, '');
+          return pat.test(cleanName);
+        });
+
         if (found) {
           // Desmarca imediatamente todos os outros episódios do pack (aumenta velocidade em até 50x)
           for (const f of engine.files) {
@@ -458,6 +486,7 @@ export class TorrentEngine {
             }
           }
           try { (found as any).select?.(); } catch {}
+          if (meta) meta.targetFile = found;
           return found;
         }
       }
@@ -471,10 +500,18 @@ export class TorrentEngine {
       }
     }
     try { (main as any).select?.(); } catch {}
+    if (meta) meta.targetFile = main;
     return main;
   }
 
   findMainVideoFile(engine: TorrentStream.TorrentEngine): TorrentStream.TorrentFile | null {
+    const hash = (engine as any).infoHash?.toLowerCase?.();
+    if (hash) {
+      const meta = this.runtimeMetaMap.get(hash);
+      if (meta?.targetFile && engine.files.includes(meta.targetFile)) {
+        return meta.targetFile;
+      }
+    }
     return this.findTargetVideoFile(engine);
   }
 
@@ -616,7 +653,7 @@ export class TorrentEngine {
         (!bitfield || typeof bitfield.get !== 'function' || !bitfield.get(endPiece) || !bitfield.get(endTailStart));
 
       if (typeof anyEngine.critical === 'function') {
-        const critWidth = Math.max(1, Math.min(2, endPiece - startPiece + 1));
+        const critWidth = Math.max(2, Math.min(4, endPiece - startPiece + 1));
         anyEngine.critical(startPiece, critWidth);
 
         if (needsEndIndex) {
@@ -625,10 +662,11 @@ export class TorrentEngine {
       }
 
       if (typeof anyEngine.select === 'function') {
-        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 2), 100);
-        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 10), 40);
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 3), 100);
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 12), 50);
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 25), 20);
         if (needsEndIndex) {
-          anyEngine.select(endTailStart, endPiece, 24);
+          anyEngine.select(endTailStart, endPiece, 28);
         }
       }
 
@@ -643,7 +681,7 @@ export class TorrentEngine {
    * e pré-carrega em segundo plano os 2 últimos blocos (índice Cues/moov) assim que a abertura já carregou!
    */
   private advanceSlidingPieceWindow(hash: string, engine: TorrentStream.TorrentEngine) {
-    const mainFile = this.findMainVideoFile(engine);
+    const mainFile = this.getActiveTargetFile(hash, engine) || this.findMainVideoFile(engine);
     if (!mainFile) return;
 
     const fileOffset = (mainFile as any).offset || 0;
@@ -675,20 +713,30 @@ export class TorrentEngine {
 
   /**
    * Concentra toda a largura de banda P2P exatamente nos primeiros blocos a partir de seekByteOffset.
-   * No início frio (seekByteOffset === 0), dedica 100% da banda apenas às peças 0..2 antes de puxar o índice final!
+   * No início frio (seekByteOffset === 0), dedica 100% da banda apenas às primeiras peças antes de puxar o índice final!
    */
-  private optimizePiecePriorities(engine: TorrentStream.TorrentEngine, seekByteOffset: number = 0) {
-    const mainFile = this.findMainVideoFile(engine);
+  private optimizePiecePriorities(
+    engine: TorrentStream.TorrentEngine,
+    seekByteOffset: number = 0,
+    targetFile?: TorrentStream.TorrentFile
+  ) {
+    const hash = (engine as any).infoHash?.toLowerCase?.();
+    const mainFile =
+      targetFile ||
+      (hash ? this.getActiveTargetFile(hash, engine) : null) ||
+      this.findMainVideoFile(engine);
     if (!mainFile) return;
 
-    const hash = (engine as any).infoHash?.toLowerCase?.();
     if (hash && this.runtimeMetaMap.has(hash)) {
       this.runtimeMetaMap.get(hash)!.lastSeekOffset = seekByteOffset;
+      this.runtimeMetaMap.get(hash)!.targetFile = mainFile;
     }
 
     for (const file of engine.files) {
       if (file !== mainFile) {
-        file.deselect();
+        try {
+          file.deselect();
+        } catch {}
       }
     }
 
@@ -1097,7 +1145,7 @@ export class TorrentEngine {
       if (useHttpLoopbackSeek && !endIndexCached) {
         this.applyCleanPriorityWindow(engine, fileFirstPiece, endPiece, true);
       } else if (!useHttpLoopbackSeek) {
-        this.optimizePiecePriorities(engine, 0);
+        this.optimizePiecePriorities(engine, 0, file);
       }
 
       const { info: probedInfo, gotBytes } = await this.getOrProbeMediaInfo(hash, engine, file, 16000);
@@ -1178,7 +1226,7 @@ export class TorrentEngine {
     const fileSize = file.length;
 
     if (!range) {
-      this.optimizePiecePriorities(engine, 0);
+      this.optimizePiecePriorities(engine, 0, file);
 
       res.setHeader('X-Popoca-Stream-Mode', 'native');
       res.setHeader('Content-Type', 'video/mp4');
@@ -1221,7 +1269,7 @@ export class TorrentEngine {
       }
     }
 
-    this.optimizePiecePriorities(engine, start);
+    this.optimizePiecePriorities(engine, start, file);
 
     const chunkSize = end - start + 1;
     res.writeHead(206, {

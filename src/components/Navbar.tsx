@@ -98,12 +98,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full px-2.5 sm:px-5 lg:px-8 pt-2.5 sm:pt-3 pb-1.5">
-      <div className="max-w-[1440px] mx-auto h-13 sm:h-14 px-2.5 sm:px-4 rounded-2xl sm:rounded-full glass-capsule flex items-center justify-between gap-2 sm:gap-3 transition-all duration-300">
+      <div className="relative max-w-[1440px] mx-auto h-13 sm:h-14 px-2.5 sm:px-4 rounded-2xl sm:rounded-full glass-capsule flex items-center justify-between gap-2 sm:gap-3 transition-all duration-300">
         {/* Marca Apple TV Minimalista */}
         <button
           type="button"
           onClick={() => onSelectCategory('trending')}
-          className="flex items-center gap-2 text-left group shrink-0 pl-0.5 sm:pl-1 focus-visible:outline-none cursor-pointer"
+          className="flex items-center gap-2 text-left group shrink-0 pl-0.5 sm:pl-1 focus-visible:outline-none cursor-pointer z-10"
         >
           <div
             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${
@@ -123,9 +123,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </button>
 
-        {/* Cápsula Central de Navegação Estilo Apple TV+ (visível a partir de 768px) */}
+        {/* Cápsula Central de Navegação Estilo Apple TV+ (perfeitamente centralizada no desktop) */}
         <nav
-          className={`hidden md:flex items-center gap-1 p-1 rounded-full ${
+          className={`hidden md:flex md:absolute md:left-1/2 md:-translate-x-1/2 items-center gap-1 p-1 rounded-full z-10 ${
             isLight
               ? 'bg-slate-900/[0.05] border border-slate-900/[0.06]'
               : 'bg-white/[0.05] border border-white/[0.07]'
@@ -155,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Controles à Direita: Busca Compacta, Tema e Perfil */}
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 md:flex-initial justify-end">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 md:flex-initial justify-end z-10">
           <div
             ref={searchContainerRef}
             className="relative flex-1 md:flex-initial min-w-0 max-w-[190px] sm:max-w-[230px] lg:w-56"
