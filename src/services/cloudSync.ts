@@ -11,7 +11,6 @@ import { letterboxdService } from './letterboxd.ts';
 
 const ACCOUNT_KEY = 'popoca_user_account_v1';
 const LAST_SYNC_KEY = 'popoca_last_synced_at_v1';
-const DEFAULT_EMAIL = 'guilhermefonseca732@gmail.com';
 
 type SyncListener = (status: {
   isSyncing: boolean;
@@ -63,9 +62,17 @@ class CloudSyncClient {
       // fallback
     }
 
+    // Conta convidada: cada navegador recebe um código aleatório próprio,
+    // assim ninguém enxerga o histórico e as listas de outra pessoa.
+    const guestId =
+      'guest_' +
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID().replace(/-/g, '')
+        : Math.random().toString(36).slice(2) + Date.now().toString(36));
+
     const defaultAccount: UserAccount = {
-      userId: DEFAULT_EMAIL.toLowerCase().replace(/[^a-z0-9]/g, '_'),
-      email: DEFAULT_EMAIL,
+      userId: guestId,
+      email: `${guestId}@popoca.app`,
       isAuthenticated: true,
       isCloudSyncEnabled: true,
       lastSyncedAt: undefined
