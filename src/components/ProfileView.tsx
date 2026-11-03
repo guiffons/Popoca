@@ -27,6 +27,7 @@ import { MediaItem, WatchHistoryItem, MovieRating, CustomList, UserProfile } fro
 import { letterboxdService } from '../services/letterboxd.ts';
 import { storageService } from '../services/storage.ts';
 import { cloudSync } from '../services/cloudSync.ts';
+import { apiUrl } from '../services/api.ts';
 import { MovieCard } from './MovieCard.tsx';
 import { LazyImage } from './LazyImage.tsx';
 import { SyncAccountModal } from './SyncAccountModal.tsx';
@@ -119,18 +120,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
     try {
       const acct = cloudSync.getAccount();
-      await fetch('/api/auth/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: acct.userId,
-          username: updated.username,
-          handle: updated.handle,
-          bio: updated.bio,
-          avatarUrl: updated.avatarUrl,
-          bannerUrl: updated.bannerUrl
-        })
-      });
+      const token = acct.token || (await cloudSync.ensureSession());
+      if (token) {
+        await fetch(apiUrl('/api/auth/profile'), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            username: updated.username,
+            handle: updated.handle,
+            bio: updated.bio,
+            avatarUrl: updated.avatarUrl,
+            bannerUrl: updated.bannerUrl
+          })
+        });
+      }
       cloudSync.syncNow();
     } catch {}
   };

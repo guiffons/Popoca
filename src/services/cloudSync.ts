@@ -2,12 +2,13 @@
  * Popoca Streaming - Cloud Sync Client Engine
  * Sincroniza em tempo real histórico de reprodução ("Continuar Assistindo"),
  * filmes assistidos, avaliações, resenhas, curtidos, listas e perfil entre múltiplos aparelhos
- * (PC, celular, tablet, TV) através da conta do usuário e pareamento por código.
+ * através de sessões seguras com Bearer Token e pareamento por código.
  */
 
-import { UserAccount, SyncData, WatchHistoryItem, MediaItem, MovieRating, CustomList, UserProfile } from '../types/index.ts';
+import { UserAccount, SyncData } from '../types/index.ts';
 import { storageService } from './storage.ts';
 import { letterboxdService } from './letterboxd.ts';
+import { apiUrl } from './api.ts';
 
 const ACCOUNT_KEY = 'popoca_user_account_v1';
 const LAST_SYNC_KEY = 'popoca_last_synced_at_v1';
@@ -33,13 +34,14 @@ class CloudSyncClient {
       this.lastSyncedAt = parseInt(storedLastSync, 10);
     }
 
-    // Sincronização inicial automática em segundo plano
     if (typeof window !== 'undefined') {
-      setTimeout(() => {
-        this.syncNow().catch((e) => console.warn('[CloudSync] Sync inicial aviso:', e));
-      }, 1500);
+      // Garante sessão válida (cria convidado anônimo no backend se necessário)
+      this.ensureSession().then(() => {
+        setTimeout(() => {
+          this.syncNow().catch((e) => console.warn('[CloudSync] Sync inicial aviso:', e));
+        }, 1500);
+      });
 
-      // Sincroniza ao focar a aba caso outro dispositivo tenha alterado algo
       window.addEventListener('focus', () => {
         const now = Date.now();
         if (!this.lastSyncedAt || now - this.lastSyncedAt > 45000) {
@@ -47,7 +49,6 @@ class CloudSyncClient {
         }
       });
 
-      // Dispara auto-sincronização automática sempre que algo for salvo localmente
       window.addEventListener('popoca_storage_changed', () => {
         this.triggerAutoSync();
       });
@@ -57,50 +58,137 @@ class CloudSyncClient {
   private loadAccount(): UserAccount {
     try {
       const raw = localStorage.getItem(ACCOUNT_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {
-      // fallback
-    }
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.userId) return parsed;
+      }
+    } catch {}
 
-    // Conta convidada: cada navegador recebe um código aleatório próprio,
-    // assim ninguém enxerga o histórico e as listas de outra pessoa.
-    const guestId =
-      'guest_' +
-      (typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID().replace(/-/g, '')
-        : Math.random().toString(36).slice(2) + Date.now().toString(36));
+    const guestId = 'guest_' + (typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+      : Math.random().toString(36).slice(2, 10));
 
     const defaultAccount: UserAccount = {
       userId: guestId,
-      email: `${guestId}@popoca.app`,
-      isAuthenticated: true,
+      email: `${guestId}@popoca.guest`,
+      isAuthenticated: false,
       isCloudSyncEnabled: true,
       lastSyncedAt: undefined
     };
+
     try {
       localStorage.setItem(ACCOUNT_KEY, JSON.stringify(defaultAccount));
     } catch {}
+
     return defaultAccount;
+  }
+
+  public async ensureSession(): Promise<string | undefined> {
+    if (this.account.token) return this.account.token;
+
+    try {
+      const res = await fetch(apiUrl('/api/auth/guest'), { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.token && json.user) {
+          this.account = {
+            userId: json.user.id,
+            email: json.user.email,
+            token: json.token,
+            isAuthenticated: false,
+            isCloudSyncEnabled: true,
+            lastSyncedAt: this.lastSyncedAt || undefined
+          };
+          localStorage.setItem(ACCOUNT_KEY, JSON.stringify(this.account));
+          this.notifyListeners();
+          return json.token;
+        }
+      }
+    } catch (e) {
+      console.warn('[CloudSync] Erro ao obter sessão convidada:', e);
+    }
+    return undefined;
   }
 
   public getAccount(): UserAccount {
     return this.account;
   }
 
-  public updateAccount(email: string): UserAccount {
-    const cleanEmail = email.trim().toLowerCase();
-    const userId = cleanEmail.replace(/[^a-z0-9]/g, '_');
-    this.account = {
-      userId,
-      email: cleanEmail,
-      isAuthenticated: true,
-      isCloudSyncEnabled: true,
-      lastSyncedAt: Date.now()
-    };
-    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(this.account));
+  public async login(email: string, password: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(apiUrl('/api/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'Erro ao realizar login.' };
+      }
+
+      this.account = {
+        userId: json.user.id,
+        email: json.user.email,
+        token: json.token,
+        isAuthenticated: true,
+        isCloudSyncEnabled: true,
+        lastSyncedAt: Date.now()
+      };
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(this.account));
+      this.notifyListeners();
+      await this.syncNow();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Falha na conexão com o servidor.' };
+    }
+  }
+
+  public async register(params: {
+    email: string;
+    password: string;
+    username?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(apiUrl('/api/auth/register'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        return { success: false, error: json.error || 'Erro ao registrar conta.' };
+      }
+
+      this.account = {
+        userId: json.user.id,
+        email: json.user.email,
+        token: json.token,
+        isAuthenticated: true,
+        isCloudSyncEnabled: true,
+        lastSyncedAt: Date.now()
+      };
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(this.account));
+      this.notifyListeners();
+      await this.syncNow();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Falha na conexão com o servidor.' };
+    }
+  }
+
+  public async logout(): Promise<void> {
+    if (this.account.token) {
+      try {
+        await fetch(apiUrl('/api/auth/logout'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${this.account.token}` }
+        });
+      } catch {}
+    }
+    localStorage.removeItem(ACCOUNT_KEY);
+    this.account = this.loadAccount();
+    await this.ensureSession();
     this.notifyListeners();
-    this.syncNow();
-    return this.account;
   }
 
   public subscribe(listener: SyncListener): () => void {
@@ -124,9 +212,6 @@ class CloudSyncClient {
     );
   }
 
-  /**
-   * Coleta o estado completo das bibliotecas locais
-   */
   public getLocalState(): SyncData {
     return {
       watchHistory: storageService.getWatchHistory(),
@@ -139,58 +224,38 @@ class CloudSyncClient {
     };
   }
 
-  /**
-   * Aplica estado retornado pela nuvem no localStorage local
-   */
   public applyMergedState(data: Partial<SyncData>) {
     if (!data) return;
 
-    // 1. Histórico de Reprodução
     if (Array.isArray(data.watchHistory)) {
       localStorage.setItem('popoca_watch_history_v1', JSON.stringify(data.watchHistory));
     }
-
-    // 2. Avaliações
     if (data.ratings && typeof data.ratings === 'object') {
       localStorage.setItem('popoca_letterboxd_ratings_v2', JSON.stringify(data.ratings));
     }
-
-    // 3. Filmes Vistos
     if (Array.isArray(data.watched)) {
       localStorage.setItem('popoca_letterboxd_watched_v2', JSON.stringify(data.watched));
     }
-
-    // 4. Watchlist
     if (Array.isArray(data.watchlist)) {
       localStorage.setItem('popoca_letterboxd_watchlist_v2', JSON.stringify(data.watchlist));
     }
-
-    // 5. Curtidos
     if (Array.isArray(data.liked)) {
       localStorage.setItem('popoca_letterboxd_liked_v2', JSON.stringify(data.liked));
     }
-
-    // 6. Listas Personalizadas
     if (Array.isArray(data.customLists)) {
       localStorage.setItem('popoca_letterboxd_lists_v2', JSON.stringify(data.customLists));
       localStorage.setItem('popoca_custom_lists_v1', JSON.stringify(data.customLists));
     }
-
-    // 7. Perfil
     if (data.profile) {
       localStorage.setItem('popoca_letterboxd_profile_v2', JSON.stringify(data.profile));
       localStorage.setItem('popoca_user_profile_v1', JSON.stringify(data.profile));
     }
 
-    // Dispara evento customizado para os componentes re-renderizarem
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('popoca_storage_synced'));
     }
   }
 
-  /**
-   * Agenda sincronização silenciosa em 2 segundos (debounce)
-   */
   public triggerAutoSync() {
     if (!this.account.isCloudSyncEnabled) return;
     if (this.syncTimer) clearTimeout(this.syncTimer);
@@ -200,26 +265,35 @@ class CloudSyncClient {
     }, 2000);
   }
 
-  /**
-   * Executa sincronização bidirecional imediata com o servidor
-   */
   public async syncNow(): Promise<boolean> {
     if (this.isSyncing) return true;
     this.isSyncing = true;
     this.notifyListeners();
 
     try {
+      const token = await this.ensureSession();
+      if (!token) {
+        throw new Error('Sessão indisponível.');
+      }
+
       const localState = this.getLocalState();
-      const res = await fetch(`/api/sync/${encodeURIComponent(this.account.userId)}`, {
+      const res = await fetch(apiUrl('/api/sync'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({
-          email: this.account.email,
           clientData: localState
         })
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          // Token expirado: recria sessão
+          this.account.token = undefined;
+          await this.ensureSession();
+        }
         throw new Error(`Servidor respondeu com status ${res.status}`);
       }
 
@@ -244,14 +318,16 @@ class CloudSyncClient {
     }
   }
 
-  /**
-   * Gera código de pareamento para conectar outro dispositivo (ex: TV, Celular, Tablet)
-   */
   public async generatePairCode(): Promise<string> {
-    const res = await fetch('/api/sync/pair-code', {
+    const token = await this.ensureSession();
+    if (!token) throw new Error('Autenticação necessária para gerar código');
+
+    const res = await fetch(apiUrl('/api/sync/pair-code'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: this.account.userId })
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      }
     });
     const json = await res.json();
     if (json.success && json.code) {
@@ -260,21 +336,18 @@ class CloudSyncClient {
     throw new Error(json.error || 'Não foi possível gerar código de pareamento');
   }
 
-  /**
-   * Conecta este aparelho a outro dispositivo através de um código de 6 dígitos
-   */
   public async linkDeviceWithPairCode(code: string): Promise<boolean> {
-    const res = await fetch('/api/sync/pair-code/redeem', {
+    const res = await fetch(apiUrl('/api/sync/pair-code/redeem'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: code.trim() })
     });
     const json = await res.json();
-    if (json.success && json.data) {
-      // Atualiza a conta neste dispositivo
+    if (json.success && json.token && json.data) {
       this.account = {
         userId: json.data.userId,
         email: json.data.email,
+        token: json.token,
         isAuthenticated: true,
         isCloudSyncEnabled: true,
         lastSyncedAt: Date.now()

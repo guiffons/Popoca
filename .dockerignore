@@ -1,8 +1,15 @@
 node_modules
 dist
+dist-server
 .git
 .gitignore
+.aistudio
+*.md
+popoca.db*
+popoca-cache
 cloudflared.exe
 *.log
 .env
 .env.local
+.env.*
+!.env.example

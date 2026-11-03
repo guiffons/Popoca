@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Clapperboard, X, Sun, Moon, Film, Star } from 'lucide-react';
+import { Search, Clapperboard, X, Sun, Moon, Film, Star, Magnet } from 'lucide-react';
 import { MediaItem } from '../types/index.ts';
 import { api } from '../services/api.ts';
 import { storageService } from '../services/storage.ts';
@@ -16,6 +16,7 @@ interface NavbarProps {
   onToggleTheme: () => void;
   onSelectCategory: (category: string, query?: string) => void;
   onSelectMedia: (media: MediaItem) => void;
+  onOpenMagnetModal?: () => void;
 }
 
 const NAV_TABS = [
@@ -32,7 +33,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   theme,
   onToggleTheme,
   onSelectCategory,
-  onSelectMedia
+  onSelectMedia,
+  onOpenMagnetModal
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -290,6 +292,23 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
           </div>
+
+          {/* Abrir Magnet ou Arquivo .Torrent */}
+          {onOpenMagnetModal && (
+            <button
+              type="button"
+              onClick={onOpenMagnetModal}
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                isLight
+                  ? 'bg-slate-900/[0.06] text-slate-800 hover:bg-slate-900/[0.12]'
+                  : 'bg-white/[0.08] text-white/80 hover:text-white hover:bg-white/[0.15]'
+              }`}
+              title="Abrir Magnet Link ou Arquivo .Torrent"
+              aria-label="Abrir Magnet ou Torrent"
+            >
+              <Magnet className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Alternador de Tema */}
           <button

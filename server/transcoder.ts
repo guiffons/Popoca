@@ -352,7 +352,7 @@ export class TranscoderQueueManager {
           '-avoid_negative_ts make_zero',
           '-max_muxing_queue_size 2048',
           '-frag_duration 400000',
-          '-movflags empty_moov+default_base_moof'
+          '-movflags frag_keyframe+empty_moov+default_base_moof'
         ])
         .videoCodec('libx264')
         .audioCodec('aac')
@@ -369,7 +369,7 @@ export class TranscoderQueueManager {
         '-avoid_negative_ts make_zero',
         '-max_muxing_queue_size 2048',
         '-frag_duration 400000',
-        '-movflags empty_moov+default_base_moof'
+        '-movflags frag_keyframe+empty_moov+default_base_moof'
       ];
       if (!canCopyAudio) {
         outOpts.push('-af aresample=async=1');
@@ -410,6 +410,13 @@ export class TranscoderQueueManager {
     });
 
     command.pipe(job.outputDestination, { end: true });
+
+    job.outputDestination.on('close', () => {
+      this.cancelJob(job.id);
+    });
+    job.outputDestination.on('error', () => {
+      this.cancelJob(job.id);
+    });
   }
 
   cancelJob(jobId: string) {
@@ -431,7 +438,14 @@ export class TranscoderQueueManager {
       active.isDestroyed = true;
       try {
         if (active.command) {
-          active.command.kill('SIGKILL');
+          active.command.kill('SIGTERM');
+          setTimeout(() => {
+            try {
+              if (active.command) {
+                active.command.kill('SIGKILL');
+              }
+            } catch {}
+          }, 300).unref();
         }
       } catch {}
       try {

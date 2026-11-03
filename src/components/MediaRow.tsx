@@ -17,6 +17,7 @@ interface MediaRowProps {
   onSelectMedia: (media: MediaItem) => void;
   onQuickPlay?: (media: MediaItem) => void;
   onPlayEpisode?: (media: MediaItem, episode: Episode) => void;
+  onRemoveHistoryItem?: (id: number) => void;
 }
 
 export const MediaRow: React.FC<MediaRowProps> = ({
@@ -26,7 +27,8 @@ export const MediaRow: React.FC<MediaRowProps> = ({
   historyMap = {},
   onSelectMedia,
   onQuickPlay,
-  onPlayEpisode
+  onPlayEpisode,
+  onRemoveHistoryItem
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [expandedSeries, setExpandedSeries] = useState<MediaItem | null>(null);
@@ -94,17 +96,23 @@ export const MediaRow: React.FC<MediaRowProps> = ({
               ? `T${hist.seasonNumber || 1}:E${hist.episodeNumber}`
               : undefined;
           const epSub = hist?.episodeTitle || undefined;
+          const remText =
+            hist && hist.duration > 0
+              ? `Faltam ${Math.max(1, Math.ceil((hist.duration - hist.currentTime) / 60))}m`
+              : undefined;
 
           return (
             <div key={item.id} className="snap-start">
               <MovieCard
                 media={item}
                 progressPercent={progressMap[item.id]}
+                remainingTimeText={remText}
                 episodeBadge={epBadge}
                 episodeSubtitle={epSub}
                 onSelect={onSelectMedia}
                 onQuickPlay={onQuickPlay}
                 onSelectEpisodes={() => handleOpenEpisodes(item)}
+                onRemoveHistory={onRemoveHistoryItem}
               />
             </div>
           );

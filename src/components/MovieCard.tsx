@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Play, Star, Heart, Bookmark, Layers } from 'lucide-react';
+import { Play, Star, Heart, Bookmark, Layers, X } from 'lucide-react';
 import { MediaItem } from '../types/index.ts';
 import { storageService } from '../services/storage.ts';
 import { LazyImage } from './LazyImage.tsx';
@@ -14,22 +14,26 @@ interface MovieCardProps {
   media: MediaItem;
   fluid?: boolean;
   progressPercent?: number;
+  remainingTimeText?: string;
   episodeBadge?: string;
   episodeSubtitle?: string;
   onSelect: (media: MediaItem) => void;
   onQuickPlay?: (media: MediaItem) => void;
   onSelectEpisodes?: (media: MediaItem) => void;
+  onRemoveHistory?: (mediaId: number) => void;
 }
 
 export const MovieCard: React.FC<MovieCardProps> = ({
   media,
   fluid = false,
   progressPercent,
+  remainingTimeText,
   episodeBadge,
   episodeSubtitle,
   onSelect,
   onQuickPlay,
-  onSelectEpisodes
+  onSelectEpisodes,
+  onRemoveHistory
 }) => {
   const year = media.release_date ? media.release_date.slice(0, 4) : '';
   const userRating = storageService.getRating(media.id);
@@ -99,6 +103,20 @@ export const MovieCard: React.FC<MovieCardProps> = ({
                 <Bookmark className="w-3 h-3 fill-current" />
               </div>
             )}
+            {onRemoveHistory && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveHistory(media.id);
+                }}
+                className="p-1 rounded-full bg-black/80 hover:bg-rose-600 backdrop-blur-md text-white shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto cursor-pointer"
+                title="Remover do histórico"
+                aria-label="Remover do histórico"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -117,6 +135,15 @@ export const MovieCard: React.FC<MovieCardProps> = ({
             </span>
           </div>
         ) : null}
+
+        {/* Tempo Restante do Histórico */}
+        {remainingTimeText && (
+          <div className="absolute bottom-2.5 right-2 z-10 pointer-events-none">
+            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-bold bg-black/85 backdrop-blur-md text-white/90 shadow-md">
+              {remainingTimeText}
+            </span>
+          </div>
+        )}
 
         {/* Overlay Play Hover */}
         <div className="hidden md:flex absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity duration-200 items-center justify-center">

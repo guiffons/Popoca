@@ -11,3 +11,4 @@ coverage/
 cloudflared.exe
 .env*
 !.env.example
+popoca-sync-data.json

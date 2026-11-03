@@ -30,6 +30,7 @@ import {
   Wifi,
   ShieldCheck,
   Activity,
+  ArrowDown,
   ChevronDown,
   Maximize2,
   Loader2,
@@ -51,6 +52,7 @@ import {
 import { api, SubtitleTrackInfo, FixedVideoQuality } from '../services/api.ts';
 import { storageService } from '../services/storage.ts';
 import { videoChunkCache } from '../services/videoChunkCache.ts';
+import { TorrentStatsBar } from './TorrentStatsBar.tsx';
 
 type SubtitleSize = 'sm' | 'md' | 'lg';
 const SUBTITLE_SIZE_KEY = 'popoca_subtitle_size';
@@ -249,6 +251,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   );
   const [liveStats, setLiveStats] = useState<TorrentLiveStats | null>(null);
   const [isRetryingNetwork, setIsRetryingNetwork] = useState<boolean>(false);
+  const [showTechStats, setShowTechStats] = useState<boolean>(false);
 
   // Duração autoritativa de referência
   const authoritativeDuration = useMemo(() => {
@@ -1467,6 +1470,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             return next;
           });
           break;
+        case 'KeyI':
+          e.preventDefault();
+          setShowTechStats((prev) => {
+            const next = !prev;
+            triggerHud(next ? 'Telemetria P2P Ativada' : 'Telemetria Desativada', 'activity');
+            return next;
+          });
+          break;
         default:
           if (e.key >= '0' && e.key <= '9') {
             e.preventDefault();
@@ -1636,6 +1647,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }}
         onPause={() => setIsPlaying(false)}
         onWaiting={() => setIsBuffering(true)}
+        onStalled={() => setIsBuffering(true)}
+        onSuspend={() => {
+          if (videoRef.current && videoRef.current.readyState >= 3) {
+            setIsBuffering(false);
+          }
+        }}
         onPlaying={() => setIsBuffering(false)}
         onSeeking={() => {
           if (videoRef.current && !isTranscodedRef.current && !isTimeCachedInIndexedDB(videoRef.current.currentTime)) {
@@ -2021,18 +2038,53 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           )}
 
-          {/* Indicador de Buffering */}
+          {/* Indicador de Buffering Estagiado */}
           {isBuffering && !playbackError && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] pointer-events-none z-30">
-              <div className="w-10 h-10 rounded-full border-2 border-white/20 border-t-white animate-spin mb-3" />
-              <span className="text-sm font-semibold text-white/95">
-                {currentTime > 3 ? `Carregando em ${formatTime(currentTime)}…` : 'Carregando…'}
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 backdrop-blur-sm pointer-events-none z-30 animate-in fade-in duration-200">
+              <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white animate-spin mb-3.5 shadow-2xl" />
+              <span className="text-sm font-bold text-white/95 tracking-wide">
+                {connectedPeersCount === 0
+                  ? 'Conectando ao enxame P2P…'
+                  : (!duration || duration <= 0) && currentTime < 1
+                  ? 'Buscando metadados e índice do vídeo…'
+                  : currentTime > 3
+                  ? `Sincronizando em ${formatTime(currentTime)}…`
+                  : 'Carregando peças iniciais do vídeo…'}
               </span>
-              <span className="text-[11px] text-white/55 mt-1">
-                {connectedPeersCount > 0
-                  ? `${connectedPeersCount} conexões · ${formatTransferSpeed(currentTransferSpeed)}`
-                  : 'Conectando aos peers mais rápidos'}
-              </span>
+              <div className="flex items-center gap-2 text-xs font-mono text-white/70 mt-2 bg-black/50 px-3.5 py-1.5 rounded-full border border-white/10 shadow-lg">
+                <span className="flex items-center gap-1 text-emerald-400 font-semibold">
+                  <ArrowDown className="w-3.5 h-3.5" />
+                  {formatTransferSpeed(currentTransferSpeed)}
+                </span>
+                <span className="text-white/30">·</span>
+                <span className="flex items-center gap-1 text-white/80">
+                  <Users className="w-3.5 h-3.5 text-white/50" />
+                  {connectedPeersCount} peers
+                </span>
+                {liveStats?.trackerPriority && (
+                  <>
+                    <span className="text-white/30">·</span>
+                    <span className="text-white/60 text-[10px] uppercase">
+                      {liveStats.trackerPriority === 'pt-br-stability' ? 'PT-BR' : liveStats.trackerPriority === 'ultra-speed' ? 'Ultra' : 'Global'}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* HUD Flutuante de Telemetria P2P */}
+          {showTechStats && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-16 sm:top-20 right-3 sm:right-6 z-50 animate-in fade-in slide-in-from-top-2 duration-200 max-w-[92vw] sm:max-w-md"
+            >
+              <TorrentStatsBar
+                stats={liveStats}
+                magnetUri={currentTorrent.magnetUri}
+                isTranscoded={isTranscodedRef.current}
+                onClose={() => setShowTechStats(false)}
+              />
             </div>
           )}
 
@@ -2419,6 +2471,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   aria-label="Transmitir para TV"
                 >
                   <Cast className="w-4 h-4" />
+                </button>
+
+                {/* Telemetria P2P / HUD */}
+                <button
+                  type="button"
+                  onClick={() => setShowTechStats(!showTechStats)}
+                  className={`p-1.5 rounded-full transition-colors cursor-pointer ${
+                    showTechStats
+                      ? 'bg-white text-black'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                  title="Telemetria P2P & Mapa de Peças (I)"
+                  aria-label="Telemetria P2P"
+                >
+                  <Activity className="w-4 h-4" />
                 </button>
 
                 {onNextEpisode && (

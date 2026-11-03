@@ -1,8 +1,21 @@
-# Dockerfile para Popoca Streaming
-# Compatível com Render, Railway, Fly.io, Koyeb e VPS Linux (Docker)
-FROM node:22-bookworm-slim
+# Multi-stage Dockerfile para Popoca Streaming
+# Stage 1: Build Frontend (Vite) e Backend (esbuild)
+FROM node:22-bookworm-slim AS builder
 
-# Instala FFmpeg e dependências de sistema para streaming de mídia e aceleração
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+# Compila o frontend Vite (dist) e o servidor Express (dist-server)
+RUN npm run build
+
+# Stage 2: Imagem final de execução mínima e segura
+FROM node:22-bookworm-slim AS runner
+
+# Instala FFmpeg e dependências essenciais de mídia
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
@@ -11,22 +24,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Instala dependências do projeto
-COPY package*.json ./
-RUN npm install
-
-# Copia todo o código fonte
-COPY . .
-
-# Compila o frontend Vite para produção
-RUN npm run build
-
-# Configuração de ambiente de produção
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV DATA_DIR=/var/data
 
-# Porta padrão de escuta
+# Instala apenas dependências de produção
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copia artefatos compilados da etapa builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/dist-server ./dist-server
+COPY --from=builder /app/popoca-sync-data.example.json ./
+
+# Cria diretório de dados persistente com permissões para o usuário node
+RUN mkdir -p /var/data && chown -R node:node /app /var/data
+
+# Executa como usuário não-root por segurança
+USER node
+
 EXPOSE 3000
 
-# Inicializa o servidor Full-Stack (Express + P2P Torrent Engine + Vite Prod)
-CMD ["npm", "start"]
+# Verificação contínua de integridade do container
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+# Inicializa o servidor bundle compilado
+CMD ["node", "dist-server/server.js"]

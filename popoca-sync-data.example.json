@@ -1,0 +1,36 @@
+[
+  {
+    "userId": "exemplo_usuario_1",
+    "email": "exemplo@popoca.local",
+    "lastUpdated": 1700000000000,
+    "watchHistory": [
+      {
+        "id": 693134,
+        "title": "Duna: Parte 2",
+        "currentTime": 120,
+        "duration": 9960,
+        "progressPercent": 2,
+        "lastWatched": 1700000000000
+      }
+    ],
+    "ratings": {
+      "693134": {
+        "mediaId": 693134,
+        "title": "Duna: Parte 2",
+        "rating": 5,
+        "watchedDate": 1700000000000
+      }
+    },
+    "watched": [],
+    "watchlist": [],
+    "liked": [],
+    "customLists": [],
+    "profile": {
+      "username": "Cinéfilo Exemplo",
+      "handle": "@cinefilo_demo",
+      "avatarUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80",
+      "bannerUrl": "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1600&auto=format&fit=crop&q=80",
+      "bio": "Conta de exemplo para testes."
+    }
+  }
+]

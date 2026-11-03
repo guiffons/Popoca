@@ -16,6 +16,7 @@ import { VideoPlayer } from './components/VideoPlayer.tsx';
 import { ProfileView } from './components/ProfileView.tsx';
 import { LetterboxdView } from './components/LetterboxdView.tsx';
 import { LibrarySearchView } from './components/LibrarySearchView.tsx';
+import { TorrentDropZone } from './components/TorrentDropZone.tsx';
 import { MediaItem, TorrentSource, WatchHistoryItem, Episode } from './types/index.ts';
 import { api } from './services/api.ts';
 import { storageService } from './services/storage.ts';
@@ -27,6 +28,7 @@ export default function App() {
   const [libraryQuery, setLibraryQuery] = useState<string>('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => storageService.getTheme());
   const [heroItem, setHeroItem] = useState<MediaItem | null>(null);
+  const [isMagnetModalOpen, setIsMagnetModalOpen] = useState(false);
 
   const [trendingList, setTrendingList] = useState<MediaItem[]>([]);
   const [latestList, setLatestList] = useState<MediaItem[]>([]);
@@ -165,6 +167,50 @@ export default function App() {
 
   const refreshWatchHistory = () => {
     setWatchHistory(storageService.getWatchHistory());
+  };
+
+  const handleRemoveWatchHistory = (id: number) => {
+    storageService.removeWatchHistoryItem(id);
+    refreshWatchHistory();
+  };
+
+  const handlePlayCustomTorrent = (params: { magnetUri: string; title: string }) => {
+    const customMedia: MediaItem = {
+      id: Math.floor(Date.now() / 1000),
+      title: params.title,
+      original_title: params.title,
+      overview: 'Torrent transmitido via P2P no Popoca',
+      poster_path: '',
+      backdrop_path: '',
+      release_date: new Date().getFullYear().toString(),
+      vote_average: 0,
+      vote_count: 0,
+      genre_ids: [],
+      media_type: 'movie'
+    };
+
+    const customTorrent: TorrentSource = {
+      id: 'custom-' + Date.now(),
+      title: params.title,
+      magnetUri: params.magnetUri,
+      infoHash: '',
+      quality: '1080p',
+      seeds: 40,
+      peers: 8,
+      sizeBytes: 2000000000,
+      sizeFormatted: 'Sob Demanda',
+      isPortugueseAudio: true,
+      source: 'Torrent P2P'
+    };
+
+    setSelectedMedia(null);
+    setIsPlayerMini(false);
+    setActivePlayerState({
+      media: customMedia,
+      torrent: customTorrent,
+      availableTorrents: [customTorrent],
+      initialTime: 0
+    });
   };
 
   const progressMap = watchHistory.reduce((acc, curr) => {
@@ -416,6 +462,7 @@ export default function App() {
         onToggleTheme={toggleTheme}
         onSelectCategory={handleSelectCategory}
         onSelectMedia={(media) => setSelectedMedia(media)}
+        onOpenMagnetModal={() => setIsMagnetModalOpen(true)}
       />
 
       <main className="flex-1">
@@ -469,6 +516,7 @@ export default function App() {
                         historyMap={historyMap}
                         onSelectMedia={(m) => handleResumeWatch(m)}
                         onQuickPlay={(m) => handleResumeWatch(m)}
+                        onRemoveHistoryItem={handleRemoveWatchHistory}
                       />
                     </motion.div>
                   )}
@@ -762,6 +810,12 @@ export default function App() {
         currentCategory={currentCategory}
         theme={theme}
         onSelectCategory={handleSelectCategory}
+      />
+
+      <TorrentDropZone
+        onPlayCustomTorrent={handlePlayCustomTorrent}
+        isModalOpen={isMagnetModalOpen}
+        onCloseModal={() => setIsMagnetModalOpen(false)}
       />
     </div>
   );

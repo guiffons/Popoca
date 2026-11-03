@@ -36,6 +36,9 @@ export interface TorrentLiveStats {
   autoRetryCount: number;
   lastRetryTimestamp?: number;
   isLowSpeed?: boolean;
+  pieceMap?: number[];
+  totalPieces?: number;
+  pieceLength?: number;
 }
 
 export interface Episode {
@@ -144,6 +147,7 @@ export interface UserProfile {
 export interface UserAccount {
   userId: string;
   email: string;
+  token?: string;
   isAuthenticated: boolean;
   isCloudSyncEnabled: boolean;
   lastSyncedAt?: number;

@@ -7,54 +7,54 @@ on:
     branches: [ main, master ]
 
 jobs:
-  validate-and-build:
-    name: Build, Lint & Automated Tests
+  validate-test-and-build:
+    name: Lint, Test & Multi-Stage Build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout do código
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Configurar Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
 
-      - name: Install System Dependencies (FFmpeg)
+      - name: Instalar Dependências do Sistema (FFmpeg)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Install NPM Dependencies
+      - name: Instalar Dependências NPM
         run: npm ci
 
-      - name: Typecheck TypeScript
+      - name: Auditoria de Segurança de Dependências
+        run: npm audit --omit=dev
+
+      - name: Verificação de Tipos TypeScript (Strict)
         run: npm run lint
 
-      - name: Build Frontend (Vite)
+      - name: Executar Testes Automatizados (Vitest)
+        run: npm test
+
+      - name: Compilar Frontend e Backend (esbuild + Vite)
         run: npm run build
 
-      - name: Verify FFmpeg Capabilities
-        run: ffmpeg -version
+      - name: Construir Imagem Docker Multi-Stage
+        run: docker build -t popoca-streaming:latest .
 
   deploy:
-    name: Continuous Deployment
-    needs: validate-and-build
+    name: Verificação de Publicação
+    needs: validate-test-and-build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout do código
         uses: actions/checkout@v4
 
-      - name: Authenticate Container Registry
-        run: echo "Container Registry Authenticated"
-
-      - name: Build Docker Container
+      - name: Validação do Pacote de Deploy
         run: |
-          docker build -t popoca-streaming:latest . || true
-
-      - name: Deploy to Cloud Production
-        run: |
-          echo "Popoca Streaming deploy executado com sucesso."
+          echo "Pipeline de validação e compilação concluído com sucesso."
+          echo "Pronto para deploy automático via Render Webhook ou Docker Registry."

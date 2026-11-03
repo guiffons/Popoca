@@ -3,7 +3,7 @@
  * Sincronização em nuvem e entre dispositivos com persistência no banco de dados SQLite.
  */
 
-import { db } from './database.ts';
+import { db, SafeDbUser } from './database.ts';
 
 export interface UserSyncData {
   userId: string;
@@ -23,9 +23,8 @@ class CloudSyncService {
     return (id || '').trim().toLowerCase();
   }
 
-  public getUser(userIdOrEmail: string): UserSyncData | null {
-    const key = this.normalizeId(userIdOrEmail);
-    const user = db.getUserById(key) || db.getUserByEmail(key);
+  public getUser(userId: string): UserSyncData | null {
+    const user = db.getUserById(userId);
     if (!user) return null;
 
     const data = db.getUserData(user.id);
@@ -50,15 +49,15 @@ class CloudSyncService {
     };
   }
 
-  public syncUserData(userId: string, email: string, clientData: Partial<UserSyncData>): UserSyncData {
-    return db.syncUserData(userId, email, clientData);
+  public syncUserData(userId: string, clientData: any): UserSyncData {
+    return db.syncUserData(userId, clientData);
   }
 
   public generatePairCode(userId: string): string {
     return db.generatePairCode(userId);
   }
 
-  public redeemPairCode(code: string): UserSyncData | null {
+  public redeemPairCode(code: string): { user: SafeDbUser; token: string; data: any } | null {
     return db.redeemPairCode(code);
   }
 }
