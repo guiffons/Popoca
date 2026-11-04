@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate-test-and-build:
-    name: Lint, Test & Multi-Stage Build
+    name: Lint, Test & Build
     runs-on: ubuntu-latest
 
     steps:
@@ -19,6 +19,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
 
       - name: Instalar Dependências do Sistema (FFmpeg)
         run: |
@@ -26,10 +27,10 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       - name: Instalar Dependências NPM
-        run: npm install
+        run: npm ci
 
       - name: Auditoria de Segurança de Dependências
-        run: npm audit --omit=dev || true
+        run: npm audit --audit-level=critical --omit=dev
 
       - name: Verificação de Tipos TypeScript (Strict)
         run: npm run lint
@@ -40,7 +41,7 @@ jobs:
       - name: Compilar Frontend e Backend (esbuild + Vite)
         run: npm run build
 
-      - name: Construir Imagem Docker Multi-Stage
+      - name: Construir Imagem Docker
         run: docker build -t popoca-streaming:latest .
 
   deploy:
