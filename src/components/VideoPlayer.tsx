@@ -475,8 +475,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         episode?.episodeNumber
       );
 
-      // ESTRITAMENTE mesmo idioma + mesma qualidade (impede Sonic 3 PT-BR cair em YTS Inglês!)
-      const sameQualityAndLangAlts = (torrentsPool || [])
+            const pool = torrentsPool || [];
+      const sameQualityAlts = pool
         .filter(
           (t) =>
             t.id !== targetTorrent.id &&
@@ -486,6 +486,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         )
         .sort((a, b) => (b.stabilityScore || b.seeds) - (a.stabilityScore || a.seeds))
         .map((t) => t.magnetUri);
+
+      const otherQualitySameLangAlts = pool
+        .filter(
+          (t) =>
+            t.id !== targetTorrent.id &&
+            t.quality !== targetTorrent.quality &&
+            t.isPortugueseAudio === targetTorrent.isPortugueseAudio &&
+            t.magnetUri?.startsWith('magnet:?') &&
+            t.seeds >= 2
+        )
+        .sort((a, b) => (b.stabilityScore || b.seeds) - (a.stabilityScore || a.seeds))
+        .map((t) => t.magnetUri);
+
+      const sameQualityAndLangAlts = [...sameQualityAlts, ...otherQualitySameLangAlts].slice(0, 4);
 
       if (targetTorrent.magnetUri && targetTorrent.magnetUri.startsWith('magnet:?')) {
         return (
@@ -775,6 +789,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         return false;
       }
 
+            // 1. Tenta candidatos da MESMA qualidade e MESMO idioma
       let candidates = torrentsPool.filter(
         (t) =>
           t.id !== currentTorrent.id &&
@@ -783,16 +798,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           !failedTorrentIds.has(t.id)
       );
 
-      if (isManualForce && candidates.length === 0) {
+      // 2. Se não houver da mesma qualidade, tenta OUTRAS qualidades do MESMO idioma com seeds ativas
+      if (candidates.length === 0) {
         candidates = torrentsPool.filter(
           (t) =>
             t.id !== currentTorrent.id &&
-            t.quality === preferredQuality &&
+            t.isPortugueseAudio === currentTorrent.isPortugueseAudio &&
+            !failedTorrentIds.has(t.id) &&
+            t.seeds >= 1
+        );
+      }
+
+      // 3. Força manual ou reset de falhas
+      if (candidates.length === 0) {
+        candidates = torrentsPool.filter(
+          (t) =>
+            t.id !== currentTorrent.id &&
             t.isPortugueseAudio === currentTorrent.isPortugueseAudio
         );
         if (candidates.length > 0) {
           setFailedTorrentIds(new Set());
         }
+      }
+
+      // 4. Último caso: semente em idioma Original com boas sementes
+      if (candidates.length === 0) {
+        candidates = torrentsPool.filter(
+          (t) => t.id !== currentTorrent.id && !failedTorrentIds.has(t.id) && t.seeds >= 2
+        );
       }
 
       if (candidates.length === 0) {
@@ -813,13 +846,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
 
       setCurrentTorrent(nextStable);
+      setPreferredQuality(nextStable.quality);
       setRetryAttempts(0);
       reconnectStreamAtTime(lastKnownTimeRef.current, true, nextStable, audioTrackOverride);
 
       showToastNotification(
-        `Alternando para outra semente ${preferredQuality} ${nextStable.isPortugueseAudio ? 'PT-BR' : 'Original'
-        } (${nextStable.seeds} seeds)...`,
-        3200
+        `Alternando para semente saudável ${nextStable.quality} ${nextStable.isPortugueseAudio ? 'Dublado PT-BR' : 'Original'} (${nextStable.seeds} seeds)...`,
+        3500
       );
 
       return true;
@@ -1059,6 +1092,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     activeVideoSrc,
     streamKey
   ]);
+
+  // Detector de congelamento inicial: se ficar mais de 12s em 0:00 com 0 KB/s, troca automaticamente de fonte
+  useEffect(() => {
+    if (!isBuffering || playbackError || !currentTorrent.magnetUri) return;
+
+    const stallTimer = setTimeout(() => {
+      if (
+        lastKnownTimeRef.current < 2 &&
+        isBuffering &&
+        (!liveStats || liveStats.downloadSpeed === 0) &&
+        torrentsPool.length > 1
+      ) {
+        console.log('[VideoPlayer] Semente inicial congelada (>12s sem dados). Alternando para fonte saudável...');
+        switchToNextStableSameQualitySeed(false);
+      }
+    }, 12000);
+
+    return () => clearTimeout(stallTimer);
+  }, [isBuffering, playbackError, currentTorrent.id, liveStats?.downloadSpeed, torrentsPool.length, switchToNextStableSameQualitySeed]);
 
   /**
    * Recuperação Silenciosa de Buffer (SEM trocar de seed sozinho no meio do filme!):
@@ -2143,7 +2195,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <button
                     onClick={() => {
                       setRetryAttempts(0);
-                      handleManualNetworkRetry(false);
+                      handleManualNetworkRetry(true);
                     }}
                     className="flex-1 py-2.5 px-4 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs rounded-xl shadow-md transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >

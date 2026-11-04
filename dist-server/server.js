@@ -3525,12 +3525,28 @@ var TorrentEngine = class {
       this.activeReadStreamsMap.set(hash, /* @__PURE__ */ new Set());
     }
     this.activeReadStreamsMap.get(hash).add(rs);
+    const engine = this.enginesMap.get(hash);
+    if (engine && typeof engine.swarm?.resume === "function") {
+      try {
+        engine.swarm.resume();
+      } catch {
+      }
+    }
   }
   unregisterReadStream(hash, rs) {
     const set = this.activeReadStreamsMap.get(hash);
     if (set) {
       set.delete(rs);
-      if (set.size === 0) this.activeReadStreamsMap.delete(hash);
+      if (set.size === 0) {
+        this.activeReadStreamsMap.delete(hash);
+        const engine = this.enginesMap.get(hash);
+        if (engine && typeof engine.swarm?.pause === "function") {
+          try {
+            engine.swarm.pause();
+          } catch {
+          }
+        }
+      }
     }
   }
   getTrackerPriority() {

@@ -129,10 +129,23 @@ export const api = {
 
     const pickFromLanguagePool = (pool: TorrentSource[]): TorrentSource | undefined => {
       if (pool.length === 0) return undefined;
-      const exactQualityHealthy = sortByStability(
+
+      const exactQualityMatches = sortByStability(
         pool.filter((s) => s.quality === targetQuality && s.seeds >= 2)
       );
-      if (exactQualityHealthy.length > 0) return exactQualityHealthy[0];
+      const veryHealthyMatches = sortByStability(
+        pool.filter((s) => s.seeds >= 15)
+      );
+
+      // Se a qualidade pedida tem sementes sólidas (>= 8) ou não há nenhuma outra com abundância de seeds, usa ela
+      if (exactQualityMatches.length > 0) {
+        if (exactQualityMatches[0].seeds >= 8 || veryHealthyMatches.length === 0) {
+          return exactQualityMatches[0];
+        }
+        // Se a resolução pedida tem poucas sementes (<8) mas outra resolução do mesmo idioma tem 15+ seeds reais,
+        // prefere o enxame saudável para evitar ficar travado em 0 KB/s
+        return veryHealthyMatches[0];
+      }
 
       // Se a qualidade pedida não tiver >= 2 seeds nesse idioma, tenta 1080p -> 720p -> 4K dentro do MESMO idioma!
       for (const fallbackQ of ['1080p', '720p', '4K'] as const) {
