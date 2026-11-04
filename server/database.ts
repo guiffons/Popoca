@@ -10,6 +10,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 
 const DATA_DIR = process.env.DATA_DIR || process.cwd();
+try { if (!fs.existsSync(DATA_DIR)) { fs.mkdirSync(DATA_DIR, { recursive: true }); } } catch {}
 const DB_PATH = path.resolve(DATA_DIR, 'popoca.db');
 const EXAMPLE_JSON_PATH = path.resolve(process.cwd(), 'popoca-sync-data.example.json');
 

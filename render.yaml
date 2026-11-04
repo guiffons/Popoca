@@ -2,19 +2,13 @@ services:
   - type: web
     name: popoca-streaming
     runtime: node
-    plan: standard # Para Render Free, o disco é efêmero; em plano com persistent disk, monta em /var/data
-    buildCommand: npm install && npm run build
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
         value: 22.14.0
-      - key: DATA_DIR
-        value: /var/data
       - key: MAX_ACTIVE_TORRENTS
         value: "5"
-    disk:
-      name: popoca-data
-      mountPath: /var/data
-      sizeGB: 1
