@@ -21,8 +21,8 @@ export const API_BASE = (import.meta.env?.VITE_API_URL || '').replace(/\/+$/, ''
 
 export function apiUrl(path: string): string {
   if (!API_BASE) return path;
-  const clean = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE}${clean}`;
+  const clean = path.startsWith('/') ? path : '/' + path;
+  return API_BASE + clean;
 }
 
 export type FixedVideoQuality = '720p' | '1080p' | '4K';
@@ -91,14 +91,14 @@ export const api = {
       if (saved === '720p' || saved === '1080p' || saved === '4K') {
         return saved;
       }
-    } catch {}
+    } catch { }
     return '1080p';
   },
 
   setPreferredQuality(quality: FixedVideoQuality): void {
     try {
       localStorage.setItem(PREFERRED_QUALITY_STORAGE_KEY, quality);
-    } catch {}
+    } catch { }
   },
 
   /**
@@ -161,7 +161,7 @@ export const api = {
       if (saved === 'pt-br-stability' || saved === 'ultra-speed' || saved === 'global-balanced') {
         return saved;
       }
-    } catch {}
+    } catch { }
     return 'pt-br-stability';
   },
 
@@ -171,14 +171,14 @@ export const api = {
   ): Promise<TrackerPriorityMode> {
     try {
       localStorage.setItem(TRACKER_PRIORITY_STORAGE_KEY, mode);
-    } catch {}
+    } catch { }
     try {
-      await fetch(apiUrl('/api/torrent/tracker-priority'), {
+      await fetch('/api/torrent/tracker-priority', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackerPriority: mode, magnet: magnetUri })
       });
-    } catch {}
+    } catch { }
     return mode;
   },
 
@@ -188,7 +188,7 @@ export const api = {
   ): Promise<{ success: boolean; stats: TorrentLiveStats | null }> {
     if (!magnetUri) return { success: false, stats: null };
     try {
-      const res = await fetch(apiUrl('/api/torrent/retry'), {
+      const res = await fetch('/api/torrent/retry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -211,20 +211,20 @@ export const api = {
     try {
       const cached = await idbService.getCachedCatalog(category, page);
       if (cached && cached.length > 0) {
-        fetch(apiUrl(`/api/catalog?category=${category}&page=${page}`))
+        fetch(`/api/catalog?category=${category}&page=${page}`)
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (data?.items?.length) {
               idbService.setCachedCatalog(category, page, data.items);
             }
           })
-          .catch(() => {});
+          .catch(() => { });
         return cached;
       }
-    } catch {}
+    } catch { }
 
     try {
-      const res = await fetch(apiUrl(`/api/catalog?category=${category}&page=${page}`));
+      const res = await fetch(`/api/catalog?category=${category}&page=${page}`);
       if (!res.ok) return [];
       const data = await res.json();
       const items = data.items || [];
@@ -247,10 +247,10 @@ export const api = {
       if (cached && cached.length > 0) {
         return cached;
       }
-    } catch {}
+    } catch { }
 
     try {
-      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) return [];
       const data = await res.json();
       const results = data.results || [];
@@ -267,7 +267,7 @@ export const api = {
   async getSuggestions(query: string): Promise<any[]> {
     if (!query.trim()) return [];
     try {
-      const res = await fetch(apiUrl(`/api/search/suggestions?q=${encodeURIComponent(query)}`));
+      const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(query)}`);
       if (!res.ok) return [];
       const data = await res.json();
       return data.suggestions || [];
@@ -282,9 +282,9 @@ export const api = {
       if (cached && ((type !== 'tv' && type !== 'anime') || (cached.seasons && cached.seasons.length > 0))) {
         return cached;
       }
-    } catch {}
+    } catch { }
 
-    const res = await fetch(apiUrl(`/api/details/${id}?type=${type}`));
+    const res = await fetch(`/api/details/${id}?type=${type}`);
     if (!res.ok) throw new Error('Falha ao obter detalhes');
     const data = await res.json();
     const details = data.details;
@@ -301,10 +301,10 @@ export const api = {
       if (cached && cached.length > 0) {
         return cached;
       }
-    } catch {}
+    } catch { }
 
     try {
-      const res = await fetch(apiUrl(`/api/series/${seriesId}/season/${seasonNumber}`));
+      const res = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
       if (!res.ok) throw new Error('Falha ao carregar temporada');
       const data = await res.json();
       const episodes: Episode[] = data.episodes || [];
@@ -326,14 +326,14 @@ export const api = {
     title: string,
     options?:
       | {
-          originalTitle?: string;
-          year?: string;
-          imdbId?: string;
-          mediaType?: 'movie' | 'tv' | 'anime';
-          season?: number;
-          episode?: number;
-          trackerPriority?: TrackerPriorityMode;
-        }
+        originalTitle?: string;
+        year?: string;
+        imdbId?: string;
+        mediaType?: 'movie' | 'tv' | 'anime';
+        season?: number;
+        episode?: number;
+        trackerPriority?: TrackerPriorityMode;
+      }
       | string
   ): Promise<TorrentSource[]> {
     const year = typeof options === 'string' ? options : options?.year;
@@ -364,7 +364,7 @@ export const api = {
         if (typeof season === 'number') params.set('season', season.toString());
         if (typeof episode === 'number') params.set('episode', episode.toString());
 
-        const res = await fetch(apiUrl(`/api/torrents?${params.toString()}`));
+        const res = await fetch(`/api/torrents?${params.toString()}`);
         if (!res.ok) throw new Error('Falha ao obter fontes de torrent');
         const data = await res.json();
         const rawTorrents: any[] = data.torrents || [];
@@ -414,36 +414,15 @@ export const api = {
     return fetchPromise;
   },
 
-  async getTorrentStats(magnetUriOrHash: string): Promise<TorrentLiveStats | null> {
-    if (!magnetUriOrHash) return null;
+  async getTorrentStats(magnetUri: string): Promise<TorrentLiveStats | null> {
+    if (!magnetUri) return null;
     try {
-      const isPureHash = /^[a-fA-F0-9]{40}$/.test(magnetUriOrHash.trim());
-      const endpoint = isPureHash
-        ? `/api/torrent/stats/${magnetUriOrHash.trim()}`
-        : `/api/torrent/stats?magnet=${encodeURIComponent(magnetUriOrHash)}`;
-      const res = await fetch(apiUrl(endpoint));
+      const res = await fetch(`/api/torrent/stats?magnet=${encodeURIComponent(magnetUri)}`);
       if (!res.ok) return null;
       const data = await res.json();
       return data.stats || null;
     } catch {
       return null;
-    }
-  },
-
-  async uploadTorrentFile(
-    base64Data: string,
-    fileName?: string
-  ): Promise<{ success: boolean; infoHash?: string; name?: string; magnetUri?: string; error?: string }> {
-    try {
-      const res = await fetch(apiUrl('/api/torrent/upload'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ torrentData: base64Data, fileName })
-      });
-      const data = await res.json();
-      return data;
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Erro de rede ao enviar torrent.' };
     }
   },
 
@@ -483,7 +462,7 @@ export const api = {
     if (options.altMagnets && options.altMagnets.length > 0) {
       params.set('altMagnets', JSON.stringify(options.altMagnets.slice(0, 3)));
     }
-    return apiUrl(`/api/stream?${params.toString()}`);
+    return `/api/stream?${params.toString()}`;
   },
 
   getStreamByTmdbIdUrl(
@@ -519,11 +498,11 @@ export const api = {
       params.set('audioTrack', String(options.audioTrackIndex));
     }
     const qs = params.toString();
-    return apiUrl(`/api/stream/${tmdbId}${qs ? `?${qs}` : ''}`);
+    return `/api/stream/${tmdbId}${qs ? `?${qs}` : ''}`;
   },
 
   getVideoStreamProxyUrl(videoUrl: string): string {
-    return apiUrl(`/api/stream-video?url=${encodeURIComponent(videoUrl)}`);
+    return `/api/stream-video?url=${encodeURIComponent(videoUrl)}`;
   },
 
   async getSubtitleTracks(options: {
@@ -539,7 +518,7 @@ export const api = {
       if (typeof options.season === 'number') params.set('season', String(options.season));
       if (typeof options.episode === 'number') params.set('episode', String(options.episode));
       if (options.fileName) params.set('fileName', options.fileName);
-      const res = await fetch(apiUrl(`/api/subtitles/list?${params.toString()}`));
+      const res = await fetch(`/api/subtitles/list?${params.toString()}`);
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data?.tracks) ? data.tracks : [];
@@ -549,15 +528,15 @@ export const api = {
   },
 
   getSubtitleVttUrl(trackId: string): string {
-    return apiUrl(`/api/subtitles/vtt?id=${encodeURIComponent(trackId)}`);
+    return `/api/subtitles/vtt?id=${encodeURIComponent(trackId)}`;
   },
 
   preloadTorrent(magnetUri: string, trackerPriority?: TrackerPriorityMode): void {
     if (!magnetUri) return;
     const mode = trackerPriority || api.getSavedTrackerPriority();
     fetch(
-      apiUrl(`/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}&trackerPriority=${encodeURIComponent(mode)}`)
-    ).catch(() => {});
+      `/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}&trackerPriority=${encodeURIComponent(mode)}`
+    ).catch(() => { });
   },
 
   async prefetchNextChunks(
@@ -574,7 +553,7 @@ export const api = {
         duration: duration.toString()
       });
       if (typeof speed === 'number') params.set('speed', speed.toString());
-      const res = await fetch(apiUrl(`/api/torrent/prefetch?${params.toString()}`));
+      const res = await fetch(`/api/torrent/prefetch?${params.toString()}`);
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -582,9 +561,25 @@ export const api = {
     }
   },
 
+  async uploadTorrentFile(
+    base64Data: string,
+    fileName?: string
+  ): Promise<{ success: boolean; infoHash?: string; name?: string; magnetUri?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/torrent/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ torrentData: base64Data, fileName })
+      });
+      return await res.json();
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Falha de conexão com o servidor.' };
+    }
+  },
+
   async getNetworkInfo(): Promise<{ lanIp: string; port: number; lanOrigin: string }> {
     try {
-      const res = await fetch(apiUrl('/api/network-info'));
+      const res = await fetch('/api/network-info');
       if (res.ok) {
         const data = await res.json();
         if (data?.lanOrigin) {
@@ -595,7 +590,7 @@ export const api = {
           };
         }
       }
-    } catch {}
+    } catch { }
     const fallbackOrigin =
       typeof window !== 'undefined' && window.location?.origin
         ? window.location.origin

@@ -67,7 +67,7 @@ const MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES) || 2 * 1024 * 1024 *
 const CACHE_HIGH_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.8); // 80% (1.6 GB)
 const CACHE_LOW_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.5); // 50% (1.0 GB)
 const INACTIVE_EVICT_MS = 30 * 60 * 1000; // 30 minutos
-const MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 3;
+const MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 5;
 const LOW_SPEED_THRESHOLD_BYTES_SEC = 140 * 1024;
 const AUTO_RETRY_COOLDOWN_MS = 14000;
 
@@ -546,7 +546,7 @@ export class TorrentEngine {
         const cachedBuf = await fetchTorrentBuffer(hash);
         if (cachedBuf) {
           torrentInput = cachedBuf;
-          console.log(`[TorrentEngine] Metadados .torrent obtidos em cache turbo para ${hash} (${cachedBuf.length} bytes)`);
+          console.log(`[P2P Cache] Metadados .torrent obtidos via cache para ${hash.slice(0, 8)}... (${cachedBuf.length} bytes)`);
         }
       } catch {}
 
@@ -556,7 +556,7 @@ export class TorrentEngine {
         trackers: selectedTrackers,
         dht: this.sharedDht || true,
         tracker: true,
-        connections: activePriority === 'ultra-speed' ? 80 : 60,
+        connections: activePriority === 'ultra-speed' ? 140 : 100,
         uploads: 6, // Essencial para desbloqueio rápido (tit-for-tat unchoke) junto aos seeds!
         verify: false
       };
@@ -599,7 +599,7 @@ export class TorrentEngine {
 
         const timeout = setTimeout(() => {
           if (!resolved && (!engine.files || engine.files.length === 0)) {
-            console.log(`[TorrentEngine] Timeout de metadados para ${hash}`);
+            console.warn(`[P2P Timeout] Metadados não responderam em 25s para ${hash.slice(0, 8)}... (Nenhuma semente conectável nos trackers selecionados)`);
             try {
               engine.destroy(() => {});
             } catch {}
@@ -1267,7 +1267,7 @@ export class TorrentEngine {
       return valid[0];
     }
 
-    const pool = valid.slice(0, 4);
+    const pool = valid.slice(0, 2);
     let winnerHash = '';
 
     const racers = pool.map(async (mag, idx) => {

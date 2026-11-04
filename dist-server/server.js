@@ -2473,7 +2473,8 @@ var TRACKER_PROFILES = {
     "http://tracker.openbittorrent.com:80/announce",
     "udp://tracker.openbittorrent.com:6969/announce",
     "wss://tracker.openwebtorrent.com",
-    "wss://tracker.btorrent.xyz"
+    "wss://tracker.webtorrent.dev",
+    "wss://tracker.files.fm:7073/announce"
   ],
   "ultra-speed": [
     "udp://tracker.opentrackr.org:1337/announce",
@@ -3179,7 +3180,7 @@ var MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES) || 2 * 1024 * 1024 * 1
 var CACHE_HIGH_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.8);
 var CACHE_LOW_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.5);
 var INACTIVE_EVICT_MS = 30 * 60 * 1e3;
-var MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 3;
+var MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 5;
 var LOW_SPEED_THRESHOLD_BYTES_SEC = 140 * 1024;
 var AUTO_RETRY_COOLDOWN_MS = 14e3;
 function getDirectorySize(dir) {
@@ -3586,7 +3587,7 @@ var TorrentEngine = class {
         const cachedBuf = await fetchTorrentBuffer(hash);
         if (cachedBuf) {
           torrentInput = cachedBuf;
-          console.log(`[TorrentEngine] Metadados .torrent obtidos em cache turbo para ${hash} (${cachedBuf.length} bytes)`);
+          console.log(`[P2P Cache] Metadados .torrent obtidos via cache para ${hash.slice(0, 8)}... (${cachedBuf.length} bytes)`);
         }
       } catch {
       }
@@ -3596,7 +3597,7 @@ var TorrentEngine = class {
         trackers: selectedTrackers,
         dht: this.sharedDht || true,
         tracker: true,
-        connections: activePriority === "ultra-speed" ? 80 : 60,
+        connections: activePriority === "ultra-speed" ? 140 : 100,
         uploads: 6,
         // Essencial para desbloqueio rápido (tit-for-tat unchoke) junto aos seeds!
         verify: false
@@ -3634,7 +3635,7 @@ var TorrentEngine = class {
         let resolved = false;
         const timeout = setTimeout(() => {
           if (!resolved && (!engine.files || engine.files.length === 0)) {
-            console.log(`[TorrentEngine] Timeout de metadados para ${hash}`);
+            console.warn(`[P2P Timeout] Metadados n\xE3o responderam em 25s para ${hash.slice(0, 8)}... (Nenhuma semente conect\xE1vel nos trackers selecionados)`);
             try {
               engine.destroy(() => {
               });
@@ -4190,7 +4191,7 @@ var TorrentEngine = class {
     if (existingPrimary && (existingPrimary.swarm?.downloaded || 0) > 32768) {
       return valid[0];
     }
-    const pool = valid.slice(0, 4);
+    const pool = valid.slice(0, 2);
     let winnerHash = "";
     const racers = pool.map(async (mag, idx) => {
       const h = extractHash(mag);
@@ -4795,6 +4796,12 @@ import path2 from "path";
 import fs2 from "fs";
 import crypto2 from "crypto";
 var DATA_DIR = process.env.DATA_DIR || process.cwd();
+try {
+  if (!fs2.existsSync(DATA_DIR)) {
+    fs2.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch {
+}
 var DB_PATH = path2.resolve(DATA_DIR, "popoca.db");
 var EXAMPLE_JSON_PATH = path2.resolve(process.cwd(), "popoca-sync-data.example.json");
 function toSafeUser(user) {

@@ -41,6 +41,17 @@ export default function App() {
   const [comedyList, setComedyList] = useState<MediaItem[]>([]);
   const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingMsg, setLoadingMsg] = useState('Carregando catálogo...');
+
+  useEffect(() => {
+    if (!isLoading) return;
+    const t1 = setTimeout(() => setLoadingMsg('Conectando ao servidor...'), 3000);
+    const t2 = setTimeout(() => setLoadingMsg('Acordando servidor na nuvem (plano gratuito, aguarde alguns segundos)...'), 7000);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [isLoading]);
 
   const [selectedMedia, setSelectedMedia] = useState<MediaItem | null>(null);
   const [isPlayerMini, setIsPlayerMini] = useState(false);

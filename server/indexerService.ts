@@ -48,7 +48,8 @@ export const TRACKER_PROFILES: Record<TrackerPriorityMode, string[]> = {
     'http://tracker.openbittorrent.com:80/announce',
     'udp://tracker.openbittorrent.com:6969/announce',
     'wss://tracker.openwebtorrent.com',
-    'wss://tracker.btorrent.xyz'
+    'wss://tracker.webtorrent.dev',
+    'wss://tracker.files.fm:7073/announce'
   ],
   'ultra-speed': [
     'udp://tracker.opentrackr.org:1337/announce',
