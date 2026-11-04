@@ -168,6 +168,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   );
 
   const [copiedTorrentId, setCopiedTorrentId] = useState<string | null>(null);
+  const fetchedEpisodeKeyRef = React.useRef<string>('');
 
   // Hidrata detalhes completos (título PT-BR oficial, temporadas e quantidade exata de episódios)
   useEffect(() => {
@@ -245,18 +246,21 @@ export const DetailModal: React.FC<DetailModalProps> = ({
     async function fetchTorrents() {
       if (!hydratedMedia) return;
       setIsLoadingTorrents(true);
+      const reqEpisodeKey = isSeriesOrAnime ? `${selectedSeasonNumber}:${selectedEpisodeNumber}` : 'movie';
       try {
         const year = hydratedMedia.release_date ? hydratedMedia.release_date.slice(0, 4) : undefined;
         const results = await api.getTorrents(hydratedMedia.title, {
           originalTitle: hydratedMedia.original_title,
           year,
           imdbId: hydratedMedia.imdb_id,
+          tmdbId: hydratedMedia.id,
           mediaType: hydratedMedia.media_type,
           season: isSeriesOrAnime ? selectedSeasonNumber : undefined,
           episode: isSeriesOrAnime ? selectedEpisodeNumber : undefined,
           trackerPriority
         });
         if (isMounted) {
+          fetchedEpisodeKeyRef.current = reqEpisodeKey;
           setTorrents(results);
           const hasPt = results.some((t) => t.isPortugueseAudio);
           if (!userChangedAudio) {
@@ -268,7 +272,11 @@ export const DetailModal: React.FC<DetailModalProps> = ({
               preferPortuguese: true
             });
             if (best?.magnetUri) {
-              api.preloadTorrent(best.magnetUri, trackerPriority);
+              api.preloadTorrent(best.magnetUri, trackerPriority, {
+                season: isSeriesOrAnime ? selectedSeasonNumber : undefined,
+                episode: isSeriesOrAnime ? selectedEpisodeNumber : undefined,
+                fileIdx: best.fileIdx
+              });
               const savedHist = storageService
                 .getWatchHistory()
                 .find((h) => h.id === hydratedMedia.id);
@@ -461,10 +469,45 @@ export const DetailModal: React.FC<DetailModalProps> = ({
     );
   };
 
-  // Iniciar reprodução de um episódio específico direto
-  const handlePlayEpisode = (episode: Episode, openCastImmediately?: boolean) => {
+  // Iniciar reprodução de um episódio específico direto garantindo as fontes/fileIdx exatos daquele episódio!
+  const handlePlayEpisode = async (episode: Episode, openCastImmediately?: boolean) => {
     setSelectedEpisodeNumber(episode.episodeNumber);
-    const chosen = pickBestStableTorrent();
+    const targetEpKey = `${episode.seasonNumber}:${episode.episodeNumber}`;
+    let episodeTorrents = torrents;
+
+    if (fetchedEpisodeKeyRef.current !== targetEpKey || episodeTorrents.length === 0) {
+      try {
+        const yearStr = hydratedMedia.release_date ? hydratedMedia.release_date.slice(0, 4) : undefined;
+        const freshResults = await api.getTorrents(hydratedMedia.title, {
+          originalTitle: hydratedMedia.original_title,
+          year: yearStr,
+          imdbId: hydratedMedia.imdb_id,
+          tmdbId: hydratedMedia.id,
+          mediaType: hydratedMedia.media_type,
+          season: episode.seasonNumber,
+          episode: episode.episodeNumber,
+          trackerPriority
+        });
+        if (freshResults && freshResults.length > 0) {
+          episodeTorrents = freshResults;
+          fetchedEpisodeKeyRef.current = targetEpKey;
+          setTorrents(freshResults);
+        } else {
+          // Limpa fileIdx defasado de outro episódio se reutilizar temporada
+          episodeTorrents = torrents.map((t) => ({ ...t, fileIdx: undefined }));
+        }
+      } catch {
+        episodeTorrents = torrents.map((t) => ({ ...t, fileIdx: undefined }));
+      }
+    }
+
+    const preferPt = selectedAudio !== 'original';
+    const chosen =
+      api.pickBestTorrentSource(episodeTorrents, {
+        preferredQuality: selectedQuality,
+        preferPortuguese: preferPt
+      }) || episodeTorrents[0];
+
     const targetQuality = selectedQuality !== 'all' ? selectedQuality : (chosen?.quality || '1080p');
     const defaultTorrent: TorrentSource = chosen || {
       id: `ep-${episode.id}`,
@@ -487,7 +530,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
       defaultTorrent,
       forceTranscode,
       episode,
-      torrents,
+      episodeTorrents,
       undefined,
       openCastImmediately
     );
@@ -527,17 +570,17 @@ export const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto bg-black/85 backdrop-blur-2xl animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto bg-black/75">
       {/* Toast Feedback */}
       {reviewSavedToast && (
-        <div className="fixed top-6 right-6 z-50 glass-dropdown px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-900 dark:text-white border border-slate-200 dark:border-white/20 shadow-2xl flex items-center gap-2 animate-in slide-in-from-top">
+        <div className="fixed top-6 right-6 z-50 liquid-glass-heavy px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-900 dark:text-white shadow-2xl flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-500" />
           <span>Salvo no perfil!</span>
         </div>
       )}
 
       {/* Container Principal Glassmorphic */}
-      <div className="relative w-full max-w-4xl max-h-[94vh] overflow-y-auto glass-panel rounded-2xl sm:rounded-3xl border border-white/60 dark:border-white/[0.08] shadow-2xl flex flex-col my-auto box-border text-slate-900 dark:text-white">
+      <div className="relative w-full max-w-4xl max-h-[94vh] overflow-y-auto liquid-glass-heavy rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col my-auto box-border text-slate-900 dark:text-white">
         {/* Botão Fechar */}
         <button
           onClick={onClose}

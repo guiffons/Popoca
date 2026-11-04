@@ -64,6 +64,16 @@ export function extractInfoHash(magnetOrHash: string): string {
   return magnetOrHash.replace(/[^a-fA-F0-9]/g, '').slice(0, 40).toLowerCase().padEnd(40, '0');
 }
 
+// Compacta um link Magnet longo (com dezenas de trackers) para apenas o infoHash canônico nas query strings HTTP
+export function compactMagnet(magnetUri: string): string {
+  if (!magnetUri) return '';
+  const hash = extractInfoHash(magnetUri);
+  if (hash && /^[a-f0-9]{40}$/i.test(hash)) {
+    return `magnet:?xt=urn:btih:${hash}`;
+  }
+  return magnetUri;
+}
+
 // Formata tamanho em bytes ou texto para apresentação precisa ("1.85 GB", "950 MB")
 export function formatFileSize(sizeInput: number | string): string {
   if (typeof sizeInput === 'string' && /GB|MB|GiB|MiB/i.test(sizeInput)) {
@@ -102,10 +112,10 @@ export const api = {
   },
 
   /**
-   * Seleciona a melhor fonte P2P respeitando estritamente:
-   * 1. Prioridade absoluta de áudio em Português (PT-BR Dublado/Dual) por padrão
-   * 2. Qualidade fixa escolhida pelo usuário (Padrão: 1080p, ou 720p / 4K)
-   * 3. Separação rígida entre PT-BR e Original (só usa Original se não houver nenhuma fonte PT-BR ativa)
+   * FASE 2: Seleciona a melhor fonte P2P respeitando estritamente o Quality Cap:
+   * 1. Inicia EXATAMENTE na resolucao escolhida pelo usuario (ordenando pelo torrent com mais seeders dentro daquela qualidade).
+   * 2. NUNCA sobe para uma qualidade maior que a solicitada (Quality Cap).
+   * 3. Faz fallback apenas para qualidades inferiores (ex: 4K -> 1080p -> 720p).
    */
   pickBestTorrentSource(
     sources: TorrentSource[],
@@ -116,54 +126,70 @@ export const api = {
   ): TorrentSource | undefined {
     if (!sources || sources.length === 0) return undefined;
 
-    const targetQuality =
+    const targetQuality: FixedVideoQuality =
       options.preferredQuality && options.preferredQuality !== 'all'
         ? options.preferredQuality
         : api.getPreferredQuality();
     const preferPt = options.preferPortuguese !== false;
 
-    const sortByStability = (list: TorrentSource[]) =>
+    const qualityRank: Record<FixedVideoQuality, number> = {
+      '4K': 3,
+      '1080p': 2,
+      '720p': 1
+    };
+    const maxRank = qualityRank[targetQuality] || 2;
+
+    const sortBySeeds = (list: TorrentSource[]) =>
       [...list].sort(
-        (a, b) => (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds) || b.seeds - a.seeds
+        (a, b) => b.seeds - a.seeds || (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds)
       );
+
+    // Filtra para nunca ultrapassar a qualidade solicitada (Quality Cap)
+    const cappedSources = sources.filter((s) => (qualityRank[s.quality] || 2) <= maxRank);
+    const activeSources = cappedSources.length > 0 ? cappedSources : sources;
 
     const pickFromLanguagePool = (pool: TorrentSource[]): TorrentSource | undefined => {
       if (pool.length === 0) return undefined;
 
-      const exactQualityMatches = sortByStability(
-        pool.filter((s) => s.quality === targetQuality && s.seeds >= 2)
+      // 1. Inicia exatamente na qualidade solicitada ordenada por mais seeders
+      const exactQualityMatches = sortBySeeds(
+        pool.filter((s) => s.quality === targetQuality && s.seeds >= 1)
       );
-      const veryHealthyMatches = sortByStability(
-        pool.filter((s) => s.seeds >= 15)
-      );
-
-      // Se a qualidade pedida tem sementes sólidas (>= 8) ou não há nenhuma outra com abundância de seeds, usa ela
       if (exactQualityMatches.length > 0) {
-        if (exactQualityMatches[0].seeds >= 8 || veryHealthyMatches.length === 0) {
-          return exactQualityMatches[0];
-        }
-        // Se a resolução pedida tem poucas sementes (<8) mas outra resolução do mesmo idioma tem 15+ seeds reais,
-        // prefere o enxame saudável para evitar ficar travado em 0 KB/s
-        return veryHealthyMatches[0];
+        return exactQualityMatches[0];
       }
 
-      // Se a qualidade pedida não tiver >= 2 seeds nesse idioma, tenta 1080p -> 720p -> 4K dentro do MESMO idioma!
-      for (const fallbackQ of ['1080p', '720p', '4K'] as const) {
-        const qMatches = sortByStability(
-          pool.filter((s) => s.quality === fallbackQ && s.seeds >= 2)
+      // 2. Fallback apenas para resolucoes inferiores
+      const lowerLadder: FixedVideoQuality[] =
+        targetQuality === '4K' ? ['1080p', '720p'] : targetQuality === '1080p' ? ['720p'] : [];
+
+      for (const fallbackQ of lowerLadder) {
+        const qMatches = sortBySeeds(
+          pool.filter((s) => s.quality === fallbackQ && s.seeds >= 1)
         );
         if (qMatches.length > 0) return qMatches[0];
       }
 
-      const anySeed = sortByStability(pool.filter((s) => s.seeds >= 1));
-      return anySeed[0] || sortByStability(pool)[0];
+      return sortBySeeds(pool)[0];
     };
 
-    const ptPool = sources.filter((s) => s.isPortugueseAudio);
-    const origPool = sources.filter((s) => !s.isPortugueseAudio);
+    const ptPool = activeSources.filter((s) => s.isPortugueseAudio);
+    const origPool = activeSources.filter((s) => !s.isPortugueseAudio);
 
     if (preferPt) {
-      return pickFromLanguagePool(ptPool) || pickFromLanguagePool(origPool);
+      const healthyPtPool = ptPool.filter((s) => {
+        const minSeeds = (s.sizeBytes || 0) > 4.5 * 1024 * 1024 * 1024 ? 8 : 5;
+        return s.seeds >= minSeeds;
+      });
+      if (healthyPtPool.length > 0) {
+        return pickFromLanguagePool(healthyPtPool);
+      }
+      const bestOrig = pickFromLanguagePool(origPool);
+      const bestPt = pickFromLanguagePool(ptPool);
+      if (bestOrig && bestOrig.seeds >= 20 && (!bestPt || bestPt.seeds <= 4)) {
+        return bestOrig;
+      }
+      return bestPt || bestOrig;
     }
     return pickFromLanguagePool(origPool) || pickFromLanguagePool(ptPool);
   },
@@ -186,7 +212,7 @@ export const api = {
       localStorage.setItem(TRACKER_PRIORITY_STORAGE_KEY, mode);
     } catch { }
     try {
-      await fetch('/api/torrent/tracker-priority', {
+      await fetch(apiUrl('/api/torrent/tracker-priority'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trackerPriority: mode, magnet: magnetUri })
@@ -201,7 +227,7 @@ export const api = {
   ): Promise<{ success: boolean; stats: TorrentLiveStats | null }> {
     if (!magnetUri) return { success: false, stats: null };
     try {
-      const res = await fetch('/api/torrent/retry', {
+      const res = await fetch(apiUrl('/api/torrent/retry'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -220,11 +246,27 @@ export const api = {
     }
   },
 
+  async destroyTorrent(magnetOrHash: string): Promise<boolean> {
+    if (!magnetOrHash) return false;
+    try {
+      const isMag = magnetOrHash.startsWith('magnet:?');
+      const body = isMag ? { magnet: magnetOrHash } : { infoHash: magnetOrHash };
+      const res = await fetch(apiUrl('/api/torrent/destroy'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
   async getCatalog(category: string = 'trending', page: number = 1): Promise<MediaItem[]> {
     try {
       const cached = await idbService.getCachedCatalog(category, page);
       if (cached && cached.length > 0) {
-        fetch(`/api/catalog?category=${category}&page=${page}`)
+        fetch(apiUrl(`/api/catalog?category=${category}&page=${page}`))
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
             if (data?.items?.length) {
@@ -237,7 +279,7 @@ export const api = {
     } catch { }
 
     try {
-      const res = await fetch(`/api/catalog?category=${category}&page=${page}`);
+      const res = await fetch(apiUrl(`/api/catalog?category=${category}&page=${page}`));
       if (!res.ok) return [];
       const data = await res.json();
       const items = data.items || [];
@@ -263,7 +305,7 @@ export const api = {
     } catch { }
 
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
       if (!res.ok) return [];
       const data = await res.json();
       const results = data.results || [];
@@ -280,7 +322,7 @@ export const api = {
   async getSuggestions(query: string): Promise<any[]> {
     if (!query.trim()) return [];
     try {
-      const res = await fetch(`/api/search/suggestions?q=${encodeURIComponent(query)}`);
+      const res = await fetch(apiUrl(`/api/search/suggestions?q=${encodeURIComponent(query)}`));
       if (!res.ok) return [];
       const data = await res.json();
       return data.suggestions || [];
@@ -297,7 +339,7 @@ export const api = {
       }
     } catch { }
 
-    const res = await fetch(`/api/details/${id}?type=${type}`);
+    const res = await fetch(apiUrl(`/api/details/${id}?type=${type}`));
     if (!res.ok) throw new Error('Falha ao obter detalhes');
     const data = await res.json();
     const details = data.details;
@@ -317,7 +359,7 @@ export const api = {
     } catch { }
 
     try {
-      const res = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
+      const res = await fetch(apiUrl(`/api/series/${seriesId}/season/${seasonNumber}`));
       if (!res.ok) throw new Error('Falha ao carregar temporada');
       const data = await res.json();
       const episodes: Episode[] = data.episodes || [];
@@ -342,6 +384,7 @@ export const api = {
         originalTitle?: string;
         year?: string;
         imdbId?: string;
+        tmdbId?: number;
         mediaType?: 'movie' | 'tv' | 'anime';
         season?: number;
         episode?: number;
@@ -352,6 +395,7 @@ export const api = {
     const year = typeof options === 'string' ? options : options?.year;
     const originalTitle = typeof options === 'object' ? options?.originalTitle : undefined;
     const imdbId = typeof options === 'object' ? options?.imdbId : undefined;
+    const tmdbId = typeof options === 'object' ? options?.tmdbId : undefined;
     const mediaType = typeof options === 'object' ? options?.mediaType : undefined;
     const season = typeof options === 'object' ? options?.season : undefined;
     const episode = typeof options === 'object' ? options?.episode : undefined;
@@ -359,7 +403,7 @@ export const api = {
       (typeof options === 'object' ? options?.trackerPriority : undefined) ||
       api.getSavedTrackerPriority();
 
-    const cacheKey = `${imdbId || ''}|${title}|${year || ''}|${mediaType || ''}|${season ?? ''}|${episode ?? ''}|${trackerPriority}`;
+    const cacheKey = `${imdbId || tmdbId || ''}|${title}|${year || ''}|${mediaType || ''}|${season ?? ''}|${episode ?? ''}|${trackerPriority}`;
     const cached = this.torrentsClientCache.get(cacheKey);
     if (cached && Date.now() - cached.at < 15 * 60 * 1000) {
       return cached.data;
@@ -373,11 +417,12 @@ export const api = {
         if (originalTitle) params.set('originalTitle', originalTitle);
         if (year) params.set('year', year);
         if (imdbId) params.set('imdbId', imdbId);
+        if (typeof tmdbId === 'number' && tmdbId > 0) params.set('tmdbId', tmdbId.toString());
         if (mediaType) params.set('mediaType', mediaType);
         if (typeof season === 'number') params.set('season', season.toString());
         if (typeof episode === 'number') params.set('episode', episode.toString());
 
-        const res = await fetch(`/api/torrents?${params.toString()}`);
+        const res = await fetch(apiUrl(`/api/torrents?${params.toString()}`));
         if (!res.ok) throw new Error('Falha ao obter fontes de torrent');
         const data = await res.json();
         const rawTorrents: any[] = data.torrents || [];
@@ -430,7 +475,7 @@ export const api = {
   async getTorrentStats(magnetUri: string): Promise<TorrentLiveStats | null> {
     if (!magnetUri) return null;
     try {
-      const res = await fetch(`/api/torrent/stats?magnet=${encodeURIComponent(magnetUri)}`);
+      const res = await fetch(apiUrl(`/api/torrent/stats?magnet=${encodeURIComponent(compactMagnet(magnetUri))}`));
       if (!res.ok) return null;
       const data = await res.json();
       return data.stats || null;
@@ -445,6 +490,9 @@ export const api = {
       transcode?: boolean;
       audioOnly?: boolean;
       altMagnets?: string[];
+      fallbackMagnet?: string;
+      fallbackQuality?: string;
+      quality?: string;
       trackerPriority?: TrackerPriorityMode;
       streamKey?: string;
       seekSeconds?: number;
@@ -456,10 +504,11 @@ export const api = {
     } = {}
   ): string {
     const params = new URLSearchParams({
-      magnet: magnetUri,
+      magnet: compactMagnet(magnetUri),
       trackerPriority: options.trackerPriority || api.getSavedTrackerPriority()
     });
     if (options.streamKey) params.set('_sk', options.streamKey);
+    if (options.quality) params.set('quality', options.quality);
     if (options.transcode) params.set('transcode', 'true');
     if (options.audioOnly) params.set('audioOnly', 'true');
     if (typeof options.season === 'number') params.set('season', String(options.season));
@@ -473,9 +522,42 @@ export const api = {
       params.set('audioTrack', String(options.audioTrackIndex));
     }
     if (options.altMagnets && options.altMagnets.length > 0) {
-      params.set('altMagnets', JSON.stringify(options.altMagnets.slice(0, 3)));
+      params.set('altMagnets', JSON.stringify(options.altMagnets.slice(0, 2).map(compactMagnet)));
     }
-    return `/api/stream?${params.toString()}`;
+    if (options.fallbackMagnet) {
+      params.set('fallbackMagnet', compactMagnet(options.fallbackMagnet));
+    }
+    if (options.fallbackQuality) {
+      params.set('fallbackQuality', options.fallbackQuality);
+    }
+    return apiUrl(`/api/stream?${params.toString()}`);
+  },
+
+  getHybridStreamUrl(
+    videoMagnet: string,
+    audioMagnet: string,
+    options: {
+      seekSeconds?: number;
+      audioDelayMs?: number;
+      trackerPriority?: TrackerPriorityMode;
+      season?: number;
+      episode?: number;
+    } = {}
+  ): string {
+    const params = new URLSearchParams({
+      videoMagnet: compactMagnet(videoMagnet),
+      audioMagnet: compactMagnet(audioMagnet),
+      trackerPriority: options.trackerPriority || api.getSavedTrackerPriority()
+    });
+    if (typeof options.seekSeconds === 'number' && options.seekSeconds > 1) {
+      params.set('seek', options.seekSeconds.toFixed(1));
+    }
+    if (typeof options.audioDelayMs === 'number' && options.audioDelayMs !== 0) {
+      params.set('audioDelayMs', String(Math.round(options.audioDelayMs)));
+    }
+    if (typeof options.season === 'number') params.set('season', String(options.season));
+    if (typeof options.episode === 'number') params.set('episode', String(options.episode));
+    return apiUrl(`/api/stream/hybrid?${params.toString()}`);
   },
 
   getStreamByTmdbIdUrl(
@@ -511,11 +593,11 @@ export const api = {
       params.set('audioTrack', String(options.audioTrackIndex));
     }
     const qs = params.toString();
-    return `/api/stream/${tmdbId}${qs ? `?${qs}` : ''}`;
+    return apiUrl(`/api/stream/${tmdbId}${qs ? `?${qs}` : ''}`);
   },
 
   getVideoStreamProxyUrl(videoUrl: string): string {
-    return `/api/stream-video?url=${encodeURIComponent(videoUrl)}`;
+    return apiUrl(`/api/stream-video?url=${encodeURIComponent(videoUrl)}`);
   },
 
   async getSubtitleTracks(options: {
@@ -531,7 +613,7 @@ export const api = {
       if (typeof options.season === 'number') params.set('season', String(options.season));
       if (typeof options.episode === 'number') params.set('episode', String(options.episode));
       if (options.fileName) params.set('fileName', options.fileName);
-      const res = await fetch(`/api/subtitles/list?${params.toString()}`);
+      const res = await fetch(apiUrl(`/api/subtitles/list?${params.toString()}`));
       if (!res.ok) return [];
       const data = await res.json();
       return Array.isArray(data?.tracks) ? data.tracks : [];
@@ -541,15 +623,24 @@ export const api = {
   },
 
   getSubtitleVttUrl(trackId: string): string {
-    return `/api/subtitles/vtt?id=${encodeURIComponent(trackId)}`;
+    return apiUrl(`/api/subtitles/vtt?id=${encodeURIComponent(trackId)}`);
   },
 
-  preloadTorrent(magnetUri: string, trackerPriority?: TrackerPriorityMode): void {
+  preloadTorrent(
+    magnetUri: string,
+    trackerPriority?: TrackerPriorityMode,
+    options?: { season?: number; episode?: number; fileIdx?: number }
+  ): void {
     if (!magnetUri) return;
     const mode = trackerPriority || api.getSavedTrackerPriority();
-    fetch(
-      `/api/torrent/preload?magnet=${encodeURIComponent(magnetUri)}&trackerPriority=${encodeURIComponent(mode)}`
-    ).catch(() => { });
+    const params = new URLSearchParams({
+      magnet: compactMagnet(magnetUri),
+      trackerPriority: mode
+    });
+    if (typeof options?.season === 'number') params.set('season', String(options.season));
+    if (typeof options?.episode === 'number') params.set('episode', String(options.episode));
+    if (typeof options?.fileIdx === 'number') params.set('fileIdx', String(options.fileIdx));
+    fetch(apiUrl(`/api/torrent/preload?${params.toString()}`)).catch(() => { });
   },
 
   async prefetchNextChunks(
@@ -561,12 +652,12 @@ export const api = {
     if (!magnetUri) return null;
     try {
       const params = new URLSearchParams({
-        magnet: magnetUri,
+        magnet: compactMagnet(magnetUri),
         currentTime: currentTime.toString(),
         duration: duration.toString()
       });
       if (typeof speed === 'number') params.set('speed', speed.toString());
-      const res = await fetch(`/api/torrent/prefetch?${params.toString()}`);
+      const res = await fetch(apiUrl(`/api/torrent/prefetch?${params.toString()}`));
       if (!res.ok) return null;
       return await res.json();
     } catch {
@@ -579,7 +670,7 @@ export const api = {
     fileName?: string
   ): Promise<{ success: boolean; infoHash?: string; name?: string; magnetUri?: string; error?: string }> {
     try {
-      const res = await fetch('/api/torrent/upload', {
+      const res = await fetch(apiUrl('/api/torrent/upload'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ torrentData: base64Data, fileName })
@@ -592,7 +683,7 @@ export const api = {
 
   async getNetworkInfo(): Promise<{ lanIp: string; port: number; lanOrigin: string }> {
     try {
-      const res = await fetch('/api/network-info');
+      const res = await fetch(apiUrl('/api/network-info'));
       if (res.ok) {
         const data = await res.json();
         if (data?.lanOrigin) {

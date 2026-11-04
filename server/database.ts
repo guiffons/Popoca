@@ -715,6 +715,15 @@ class PopocaDatabase {
       }
     };
   }
+
+  ping(): boolean {
+    try {
+      const row = this.db.prepare('SELECT 1 AS ok').get() as { ok?: number } | undefined;
+      return row?.ok === 1;
+    } catch {
+      return false;
+    }
+  }
 }
 
 export const db = new PopocaDatabase();

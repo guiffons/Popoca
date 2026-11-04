@@ -4,7 +4,7 @@
  * Top 4 Favoritos, métricas, avaliações, listas personalizadas e sincronização em nuvem.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Star,
   Heart,
@@ -21,7 +21,8 @@ import {
   Edit3,
   Camera,
   Check,
-  Cloud
+  Cloud,
+  Upload
 } from 'lucide-react';
 import { MediaItem, WatchHistoryItem, MovieRating, CustomList, UserProfile } from '../types/index.ts';
 import { letterboxdService } from '../services/letterboxd.ts';
@@ -55,6 +56,49 @@ const BANNER_PRESETS = [
   { name: 'Anime Sunset', url: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=1600&auto=format&fit=crop&q=80' }
 ];
 
+/**
+ * Processa a imagem selecionada na galeria mobile/desktop via HTML5 <canvas>:
+ * - Faz center-crop quadrado exato (256x256px)
+ * - Exporta como string Base64 via canvas.toDataURL('image/webp', 0.8) (Zero custo de storage externo)
+ */
+function cropImageFileToWebp256(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo de imagem.'));
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 256;
+          canvas.height = 256;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Contexto Canvas 2D indisponível.'));
+            return;
+          }
+
+          const minSide = Math.min(img.width, img.height);
+          const sx = Math.floor((img.width - minSide) / 2);
+          const sy = Math.floor((img.height - minSide) / 2);
+
+          ctx.clearRect(0, 0, 256, 256);
+          ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, 256, 256);
+
+          const webpDataUrl = canvas.toDataURL('image/webp', 0.8);
+          resolve(webpDataUrl);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error('Imagem inválida ou formato não suportado.'));
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export const ProfileView: React.FC<ProfileViewProps> = ({
   theme,
   onSelectMedia,
@@ -71,6 +115,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [letterboxdInput, setLetterboxdInput] = useState(profile.letterboxdUsername || '');
   const [avatarUrlInput, setAvatarUrlInput] = useState(profile.avatarUrl);
   const [bannerUrlInput, setBannerUrlInput] = useState(profile.bannerUrl || BANNER_PRESETS[0].url);
+  const [avatarUploadNotice, setAvatarUploadNotice] = useState<string | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
   const [watchedMovies, setWatchedMovies] = useState<MediaItem[]>([]);
@@ -106,18 +152,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     };
   }, []);
 
-  const handleSaveProfile = async () => {
-    const updated = letterboxdService.updateProfile({
-      username: usernameInput.trim() || 'Cinéfilo Popoca',
-      handle: handleInput.trim() || '@cinefilo',
-      bio: bioInput.trim(),
-      letterboxdUsername: letterboxdInput.trim(),
-      avatarUrl: avatarUrlInput.trim() || profile.avatarUrl,
-      bannerUrl: bannerUrlInput.trim() || profile.bannerUrl
-    });
-    setProfile(updated);
-    setIsEditingProfile(false);
-
+  const syncProfileWithBackend = async (updated: UserProfile) => {
     try {
       const acct = cloudSync.getAccount();
       const token = acct.token || (await cloudSync.ensureSession());
@@ -139,6 +174,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       }
       cloudSync.syncNow();
     } catch {}
+  };
+
+  const handleAvatarFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const webpBase64 = await cropImageFileToWebp256(file);
+      setAvatarUrlInput(webpBase64);
+      const updated = letterboxdService.updateProfile({
+        avatarUrl: webpBase64
+      });
+      setProfile(updated);
+      setAvatarUploadNotice('Foto otimizada em 256x256 WebP e salva no perfil.');
+      setTimeout(() => setAvatarUploadNotice(null), 3500);
+      await syncProfileWithBackend(updated);
+    } catch {
+      setAvatarUploadNotice('Não foi possível processar a imagem selecionada.');
+      setTimeout(() => setAvatarUploadNotice(null), 3500);
+    } finally {
+      if (avatarFileInputRef.current) {
+        avatarFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    const updated = letterboxdService.updateProfile({
+      username: usernameInput.trim() || 'Cinéfilo Popoca',
+      handle: handleInput.trim() || '@cinefilo',
+      bio: bioInput.trim(),
+      letterboxdUsername: letterboxdInput.trim(),
+      avatarUrl: avatarUrlInput.trim() || profile.avatarUrl,
+      bannerUrl: bannerUrlInput.trim() || profile.bannerUrl
+    });
+    setProfile(updated);
+    setIsEditingProfile(false);
+    await syncProfileWithBackend(updated);
   };
 
   const handleCreateList = (e: React.FormEvent) => {
@@ -195,9 +267,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     .filter(Boolean) as MediaItem[];
 
   return (
-    <div className="max-w-[1440px] mx-auto px-3.5 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-300">
-      {/* Cabeçalho do Perfil com Widescreen Banner Cinematográfico */}
-      <div className="rounded-3xl glass-panel mb-7 transition-colors overflow-hidden">
+    <div className="max-w-[1440px] mx-auto px-3.5 sm:px-6 lg:px-8 py-6 sm:py-8">
+      {/* Input oculto para upload de Avatar Mobile/Desktop via HTML5 Canvas (256x256 WebP) */}
+      <input
+        ref={avatarFileInputRef}
+        type="file"
+        accept="image/jpeg, image/png, image/webp"
+        hidden
+        onChange={handleAvatarFileSelected}
+      />
+
+      {/* Cabeçalho do Perfil com Widescreen Banner Cinematográfico em Liquid Glass */}
+      <div className="rounded-3xl liquid-glass mb-7 transition-colors overflow-hidden">
         {/* Banner de Fundo */}
         <div className="relative h-36 sm:h-52 lg:h-64 w-full overflow-hidden bg-slate-900 group/banner">
           <img
@@ -220,20 +301,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               setBannerUrlInput(profile.bannerUrl || BANNER_PRESETS[0].url);
               setIsEditingProfile(true);
             }}
-            className="absolute top-3.5 right-3.5 px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-xs font-semibold flex items-center gap-1.5 border border-white/20 transition-all cursor-pointer shadow-lg"
+            className="absolute top-3.5 right-3.5 px-3.5 py-1.5 rounded-full liquid-glass text-white text-xs font-semibold flex items-center gap-1.5 hover:border-white/30 transition-all cursor-pointer shadow-lg"
           >
-            <Camera className="w-3.5 h-3.5" />
-            <span>Alterar Capa & Foto</span>
+            <Camera className="w-3.5 h-3.5 text-white/90" />
+            <span>Editar Perfil & Capa</span>
           </button>
         </div>
 
         {/* Informações do Perfil sobrepostas */}
-        <div className="p-5 sm:p-8 pt-0 relative -mt-10 sm:-mt-14">
+        <div className="p-5 sm:p-8 pt-0 relative -mt-12 sm:-mt-14">
           <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-5">
             <div className="flex items-end gap-4 sm:gap-6">
+              {/* Avatar Circular com Botão Sobreposto para Galeria Mobile/Desktop */}
               <div className="relative group/avatar shrink-0">
                 <div
-                  className={`w-20 h-20 sm:w-26 sm:h-26 rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border-2 ${
+                  className={`w-22 h-22 sm:w-28 sm:h-28 rounded-full overflow-hidden shadow-2xl border-2 ${
                     isLight ? 'border-white bg-slate-900' : 'border-white/25 bg-neutral-900'
                   }`}
                 >
@@ -251,19 +333,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setUsernameInput(profile.username);
-                    setHandleInput(profile.handle || '@cinefilo');
-                    setBioInput(profile.bio);
-                    setLetterboxdInput(profile.letterboxdUsername || '');
-                    setAvatarUrlInput(profile.avatarUrl);
-                    setBannerUrlInput(profile.bannerUrl || BANNER_PRESETS[0].url);
-                    setIsEditingProfile(true);
-                  }}
-                  className="absolute inset-0 bg-black/50 opacity-0 group-hover/avatar:opacity-100 rounded-2xl sm:rounded-3xl flex items-center justify-center text-white transition-opacity duration-200 cursor-pointer"
-                  title="Alterar foto"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="absolute inset-0 bg-black/55 opacity-0 group-hover/avatar:opacity-100 rounded-full flex flex-col items-center justify-center text-white transition-opacity duration-200 cursor-pointer"
+                  title="Enviar foto da galeria"
+                  aria-label="Alterar foto de perfil da galeria"
                 >
                   <Camera className="w-5 h-5" />
+                  <span className="text-[9px] font-bold uppercase tracking-wider mt-0.5">Foto</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="absolute -bottom-0.5 -right-0.5 w-8 h-8 rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black border-2 border-[#0b0d13] flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
+                  title="Enviar foto da galeria (256x256 WebP)"
+                  aria-label="Enviar foto da galeria"
+                >
+                  <Camera className="w-3.5 h-3.5" />
                 </button>
               </div>
 
@@ -294,155 +379,207 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </p>
                 )}
 
+                {avatarUploadNotice && (
+                  <p className="text-xs font-semibold text-emerald-400 mt-1.5">
+                    {avatarUploadNotice}
+                  </p>
+                )}
+
+                <div className="flex items-center gap-3 mt-2.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsernameInput(profile.username);
+                      setHandleInput(profile.handle || '@cinefilo');
+                      setBioInput(profile.bio);
+                      setLetterboxdInput(profile.letterboxdUsername || '');
+                      setAvatarUrlInput(profile.avatarUrl);
+                      setBannerUrlInput(profile.bannerUrl || BANNER_PRESETS[0].url);
+                      setIsEditingProfile(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black text-xs font-bold shadow-md transition-all cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Editar Perfil</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-subtle text-xs font-semibold text-slate-700 dark:text-white/85 hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-slate-700 dark:text-white/90" />
+                    <span>Trocar Foto da Galeria</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Ações de Conta */}
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {onOpenLetterboxd && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setUsernameInput(profile.username);
-                    setHandleInput(profile.handle || '@cinefilo');
-                    setBioInput(profile.bio);
-                    setLetterboxdInput(profile.letterboxdUsername || '');
-                    setAvatarUrlInput(profile.avatarUrl);
-                    setBannerUrlInput(profile.bannerUrl || BANNER_PRESETS[0].url);
-                    setIsEditingProfile(true);
-                  }}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-white/60 dark:hover:text-white mt-2 cursor-pointer"
+                  onClick={onOpenLetterboxd}
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-extrabold rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black transition-all cursor-pointer shadow-sm"
                 >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Editar perfil & capa</span>
+                  <Star className="w-3.5 h-3.5 fill-current" />
+                  <span>Abrir Aba Letterboxd</span>
                 </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(true)}
+                className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer ${
+                  isLight
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
+                }`}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <Cloud className="w-3.5 h-3.5" />
+                <span>Nuvem</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-full glass-subtle text-slate-800 dark:text-white/85 hover:opacity-85 transition-opacity cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Exportar CSV</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Métricas */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-6 pt-6 border-t border-slate-200/80 dark:border-white/[0.08]">
+            <div className="p-3.5 rounded-2xl liquid-glass">
+              <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
+                {stats.totalWatched}
+              </div>
+              <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
+                Vistos
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl liquid-glass">
+              <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
+                {stats.hoursWatched}h
+              </div>
+              <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
+                Assistidas
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl liquid-glass">
+              <div className="text-2xl sm:text-3xl font-extrabold font-mono flex items-center gap-1 text-slate-900 dark:text-white">
+                <Star className="w-5 h-5 text-amber-500 dark:text-amber-400 fill-current" />
+                <span>{stats.averageRating}</span>
+              </div>
+              <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
+                Média
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl liquid-glass">
+              <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
+                {customLists.length}
+              </div>
+              <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
+                Listas
               </div>
             </div>
           </div>
 
-          {/* Ações de Conta */}
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {onOpenLetterboxd && (
-              <button
-                type="button"
-                onClick={onOpenLetterboxd}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-extrabold rounded-full bg-amber-500 hover:bg-amber-400 text-black transition-all cursor-pointer shadow-sm"
-              >
-                <Star className="w-3.5 h-3.5 fill-current" />
-                <span>Abrir Aba Letterboxd</span>
-              </button>
-            )}
+          {/* 4 Favoritos */}
+          <div className="mt-6 pt-6 border-t border-slate-200/80 dark:border-white/[0.08]">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/50 mb-3">
+              Favoritos
+            </h3>
 
-            <button
-              type="button"
-              onClick={() => setShowSyncModal(true)}
-              className={`flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-full border transition-all cursor-pointer ${
-                isLight
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20'
-              }`}
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <Cloud className="w-3.5 h-3.5" />
-              <span>Nuvem</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-full glass-subtle text-slate-800 dark:text-white/85 hover:opacity-85 transition-opacity cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Exportar CSV</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Métricas */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-6 pt-6 border-t border-slate-200/80 dark:border-white/[0.08]">
-          <div className="p-3.5 rounded-2xl glass-subtle">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
-              {stats.totalWatched}
+            <div className="grid grid-cols-4 gap-2.5 sm:gap-4 max-w-xl">
+              {[0, 1, 2, 3].map((slotIdx) => {
+                const fav = top4Favorites[slotIdx] || likedMovies[slotIdx];
+                return (
+                  <div
+                    key={slotIdx}
+                    onClick={() => fav && onSelectMedia(fav)}
+                    className={`relative aspect-[2/3] rounded-xl sm:rounded-2xl overflow-hidden border transition-transform ${
+                      fav ? 'cursor-pointer hover:scale-[1.03]' : ''
+                    } ${
+                      isLight
+                        ? 'border-slate-200 bg-slate-100/80'
+                        : 'border-white/10 bg-white/[0.03]'
+                    }`}
+                  >
+                    {fav ? (
+                      <LazyImage
+                        src={fav.poster_path}
+                        alt={fav.title}
+                        aspectRatio="poster"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-white/20 p-2 text-center">
+                        <Heart className="w-4 h-4 mb-1" />
+                        <span className="text-[10px]">#{slotIdx + 1}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
-              Vistos
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl glass-subtle">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
-              {stats.hoursWatched}h
-            </div>
-            <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
-              Assistidas
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl glass-subtle">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono flex items-center gap-1 text-slate-900 dark:text-white">
-              <Star className="w-5 h-5 text-amber-500 dark:text-amber-400 fill-current" />
-              <span>{stats.averageRating}</span>
-            </div>
-            <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
-              Média
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl glass-subtle">
-            <div className="text-2xl sm:text-3xl font-extrabold font-mono text-slate-900 dark:text-white">
-              {customLists.length}
-            </div>
-            <div className="text-xs mt-0.5 text-slate-500 dark:text-white/50">
-              Listas
-            </div>
-          </div>
-        </div>
-
-        {/* 4 Favoritos */}
-        <div className="mt-6 pt-6 border-t border-slate-200/80 dark:border-white/[0.08]">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-white/50 mb-3">
-            Favoritos
-          </h3>
-
-          <div className="grid grid-cols-4 gap-2.5 sm:gap-4 max-w-xl">
-            {[0, 1, 2, 3].map((slotIdx) => {
-              const fav = top4Favorites[slotIdx] || likedMovies[slotIdx];
-              return (
-                <div
-                  key={slotIdx}
-                  onClick={() => fav && onSelectMedia(fav)}
-                  className={`relative aspect-[2/3] rounded-xl sm:rounded-2xl overflow-hidden border transition-transform ${
-                    fav ? 'cursor-pointer hover:scale-[1.03]' : ''
-                  } ${
-                    isLight
-                      ? 'border-slate-200 bg-slate-100/80'
-                      : 'border-white/10 bg-white/[0.03]'
-                  }`}
-                >
-                  {fav ? (
-                    <LazyImage
-                      src={fav.poster_path}
-                      alt={fav.title}
-                      aspectRatio="poster"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-white/20 p-2 text-center">
-                      <Heart className="w-4 h-4 mb-1" />
-                      <span className="text-[10px]">#{slotIdx + 1}</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
           </div>
         </div>
       </div>
 
-      {/* Modal de Edição de Perfil */}
+      {/* Modal de Edição de Perfil em Liquid Glass */}
       {isEditingProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xl animate-in fade-in duration-200">
-          <div className="w-full max-w-lg glass-dropdown rounded-3xl p-6 sm:p-8 shadow-2xl relative text-slate-900 dark:text-white max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <div className="w-full max-w-lg liquid-glass-heavy rounded-3xl p-6 sm:p-8 shadow-2xl relative text-slate-900 dark:text-white max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-extrabold mb-4">Editar Perfil</h2>
 
             <div className="space-y-4">
+              {/* Preview Circular com Upload via Canvas */}
+              <div className="flex items-center gap-4 p-3.5 rounded-2xl liquid-glass">
+                <div className="relative w-18 h-18 rounded-full overflow-hidden border-2 border-slate-900 dark:border-white shrink-0 bg-neutral-900">
+                  {avatarUrlInput ? (
+                    <img src={avatarUrlInput} alt="Preview Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center font-extrabold text-xl text-white">
+                      {usernameInput ? usernameInput[0].toUpperCase() : 'P'}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 flex items-center justify-center text-white transition-opacity cursor-pointer"
+                    title="Escolher foto da galeria"
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white">Foto de Perfil (256x256 WebP)</p>
+                  <p className="text-[11px] text-slate-500 dark:text-white/55 mt-0.5">
+                    Recorte central automático via HTML5 Canvas direto no navegador.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="mt-2 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Escolher da Galeria</span>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-white/70 mb-1">Nome</label>
                 <input
@@ -477,14 +614,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-white/70 mb-1.5">Foto de Perfil (Avatar)</label>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-white/70 mb-1.5">Avatares Sugeridos</label>
                 <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-1">
                   {AVATAR_PRESETS.map((preset, pIdx) => (
                     <button
                       key={pIdx}
                       type="button"
                       onClick={() => setAvatarUrlInput(preset.url)}
-                      className={`relative w-12 h-12 rounded-xl overflow-hidden border shrink-0 transition-transform cursor-pointer ${
+                      className={`relative w-12 h-12 rounded-full overflow-hidden border shrink-0 transition-transform cursor-pointer ${
                         avatarUrlInput === preset.url
                           ? 'border-slate-900 dark:border-white ring-2 ring-slate-900 dark:ring-white scale-105'
                           : 'border-slate-300 dark:border-white/20 opacity-70 hover:opacity-100'
@@ -500,13 +637,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </button>
                   ))}
                 </div>
-                <input
-                  type="url"
-                  value={avatarUrlInput}
-                  onChange={(e) => setAvatarUrlInput(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/15 text-slate-900 dark:text-white focus:outline-none"
-                  placeholder="URL personalizada da foto (opcional)"
-                />
               </div>
 
               <div>
@@ -561,16 +691,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEditingProfile(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-full text-slate-600 hover:text-slate-900 dark:text-white/60 dark:hover:text-white transition-colors"
+                className="px-4 py-2 text-xs font-semibold rounded-full text-slate-600 hover:text-slate-900 dark:text-white/60 dark:hover:text-white transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={handleSaveProfile}
-                className="px-5 py-2 text-xs font-bold rounded-full bg-slate-900 text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity shadow-md"
+                className="px-5 py-2 text-xs font-bold rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black transition-colors shadow-md cursor-pointer"
               >
-                Salvar
+                Salvar Alterações
               </button>
             </div>
           </div>
@@ -596,9 +726,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold shrink-0 transition-all cursor-pointer ${
                 isActive
-                  ? isLight
-                    ? 'bg-slate-900 text-white shadow-sm font-bold'
-                    : 'bg-white text-black shadow-sm font-bold'
+                  ? 'bg-slate-900 text-white dark:bg-white dark:text-black shadow-sm font-bold'
                   : isLight
                   ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-900/[0.05]'
                   : 'text-white/60 hover:text-white hover:bg-white/10'
@@ -647,7 +775,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {Object.values(ratings).map((item) => (
                 <div
                   key={item.mediaId}
-                  className="p-4 rounded-2xl glass-panel flex items-start gap-4 transition-all"
+                  className="p-4 rounded-2xl liquid-glass flex items-start gap-4 transition-all"
                 >
                   <div
                     onClick={() =>
@@ -784,7 +912,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {watchHistory.map((item) => (
                 <div
                   key={item.id}
-                  className="p-3.5 rounded-2xl glass-panel flex items-center justify-between gap-4 transition-all"
+                  className="p-3.5 rounded-2xl liquid-glass flex items-center justify-between gap-4 transition-all"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-12 h-16 rounded-lg overflow-hidden shrink-0 shadow-md">
@@ -830,7 +958,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         media_type: item.mediaType
                       })
                     }
-                    className="px-3.5 py-2 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black text-xs font-bold flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-sm shrink-0 cursor-pointer"
+                    className="px-3.5 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm shrink-0 cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span className="hidden sm:inline">Continuar</span>
@@ -849,7 +977,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <button
               type="button"
               onClick={() => setShowNewListModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-slate-900 text-white dark:bg-white dark:text-black text-xs font-bold hover:opacity-90 transition-opacity shadow-sm cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black text-xs font-bold transition-colors shadow-sm cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Nova Lista</span>
@@ -864,7 +992,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           ) : (
             <div className="space-y-5">
               {customLists.map((list) => (
-                <div key={list.id} className="p-5 rounded-3xl glass-panel">
+                <div key={list.id} className="p-5 rounded-3xl liquid-glass">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h4 className="text-base font-bold text-slate-900 dark:text-white">{list.name}</h4>
@@ -907,8 +1035,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       {/* Modal Criar Nova Lista */}
       {showNewListModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xl animate-in fade-in duration-200">
-          <div className="w-full max-w-md glass-dropdown rounded-3xl p-6 shadow-2xl text-slate-900 dark:text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <div className="w-full max-w-md liquid-glass-heavy rounded-3xl p-6 shadow-2xl text-slate-900 dark:text-white">
             <h3 className="text-lg font-extrabold mb-3">Nova Lista</h3>
             <form onSubmit={handleCreateList} className="space-y-4">
               <div>
@@ -945,7 +1073,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <button
                   type="submit"
                   disabled={!newListName.trim()}
-                  className="px-5 py-2 text-xs font-bold rounded-full bg-slate-900 text-white dark:bg-white dark:text-black hover:opacity-90 transition-opacity disabled:opacity-40"
+                  className="px-5 py-2 text-xs font-bold rounded-full bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-neutral-200 dark:text-black transition-colors disabled:opacity-40"
                 >
                   Criar
                 </button>

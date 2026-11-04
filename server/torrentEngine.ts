@@ -17,9 +17,15 @@ import { createRequire } from 'module';
 import torrentStream from 'torrent-stream';
 import type { Request, Response } from 'express';
 import { transcoder, type ProbedMediaInfo } from './transcoder.ts';
-import { type TrackerPriorityMode, getTrackersForPriority } from './indexerService.ts';
+import { type TrackerPriorityMode, getTrackersForPriority, SUPER_TRACKERS } from './indexerService.ts';
 
 const require = createRequire(import.meta.url);
+const parseTorrentLib = require('parse-torrent');
+const bncodeLib = require('bncode');
+
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = '32';
+}
 
 export interface StreamExtraOptions {
   seekSeconds?: number;
@@ -28,6 +34,12 @@ export interface StreamExtraOptions {
   season?: number;
   episode?: number;
   fileIdx?: number;
+  preferredQuality?: string;
+  fallbackMagnet?: string;
+  fallbackQuality?: string;
+  fallbackFileIdx?: number;
+  isFallbackAttempt?: boolean;
+  hasAlternatives?: boolean;
 }
 
 export interface ActiveTorrentStats {
@@ -62,14 +74,19 @@ interface EngineRuntimeMeta {
   targetFile?: TorrentStream.TorrentFile;
 }
 
-const CACHE_BASE_DIR = process.env.CACHE_DIR || path.join(process.env.DATA_DIR || os.tmpdir(), 'popoca-cache');
-const MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES) || 2 * 1024 * 1024 * 1024; // 2 GB
-const CACHE_HIGH_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.8); // 80% (1.6 GB)
-const CACHE_LOW_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.5); // 50% (1.0 GB)
-const INACTIVE_EVICT_MS = 30 * 60 * 1000; // 30 minutos
-const MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 5;
+const CACHE_BASE_DIR = process.env.CACHE_DIR || path.join(os.tmpdir(), 'popoca-cache');
+const MAX_CACHE_BYTES = Number(process.env.MAX_CACHE_BYTES) || 384 * 1024 * 1024; // 384 MB (Blindagem 512MB RAM Render Free)
+const CACHE_HIGH_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.8);
+const CACHE_LOW_WATERMARK = Math.floor(MAX_CACHE_BYTES * 0.5);
+const INACTIVE_EVICT_MS = 15 * 60 * 1000; // 15 minutos
+const MAX_ACTIVE_ENGINES = Number(process.env.MAX_ACTIVE_TORRENTS) || 4;
 const LOW_SPEED_THRESHOLD_BYTES_SEC = 140 * 1024;
 const AUTO_RETRY_COOLDOWN_MS = 14000;
+const HEALTH_CHECK_TIMEOUT_MS = 5000; // 5 segundos para Health Check de Qualidade (Fase 2)
+const MAX_ENGINE_MEMORY_BYTES = 128 * 1024 * 1024; // 128 MB por engine (limite estrito para evitar OOM no Render)
+const CONTAINER_HEAP_HIGH_WATERMARK = 280 * 1024 * 1024; // 280 MB no heap (blindagem do contêiner 512MB)
+const MAX_CHUNK_CACHE_PER_ENGINE_BYTES = 32 * 1024 * 1024; // 32 MB max de cache de blocos em RAM por engine
+const PREFETCH_WINDOW_SECONDS = 30; // Janela de pre-fetching inteligente de 30 segundos à frente
 
 function getDirectorySize(dir: string): { size: number; newest: number } {
   let size = 0;
@@ -86,7 +103,11 @@ function getDirectorySize(dir: string): { size: number; newest: number } {
           newest = Math.max(newest, sub.newest);
         } else {
           const st = fs.statSync(fullPath);
-          size += st.size;
+          const actualAllocated =
+            typeof (st as any).blocks === 'number' && (st as any).blocks > 0
+              ? Math.min(st.size, (st as any).blocks * 512)
+              : st.size;
+          size += actualAllocated;
           newest = Math.max(newest, st.mtimeMs);
         }
       } catch {}
@@ -245,6 +266,24 @@ export function parseTorrentBuffer(buf: Buffer): {
 }
 
 /**
+ * Remove dezenas de trackers mortos embutidos nos arquivos .torrent de mirrors (que saturam o DNS/threadpool),
+ * preservando apenas o dicionário 'info' (metadados dos arquivos e hashes das peças) para injetarmos apenas os Super Trackers!
+ */
+function stripEmbeddedTrackersFromTorrentBuffer(buf: Buffer): Buffer | null {
+  try {
+    const parsed = parseTorrentLib(buf);
+    if (parsed && parsed.infoBuffer) {
+      const cleanInfo = bncodeLib.decode(parsed.infoBuffer);
+      return bncodeLib.encode({
+        info: cleanInfo,
+        'announce-list': []
+      });
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Busca concorrente paralela do arquivo .torrent validado em múltiplos mirrors de cache
  */
 async function fetchTorrentBuffer(hash: string): Promise<Buffer | null> {
@@ -264,7 +303,8 @@ async function fetchTorrentBuffer(hash: string): Promise<Buffer | null> {
       const ab = await res.arrayBuffer();
       const buf = Buffer.from(ab);
       if (isValidBencodedTorrent(buf)) {
-        return buf;
+        const cleaned = stripEmbeddedTrackersFromTorrentBuffer(buf);
+        if (cleaned) return cleaned;
       }
     }
     throw new Error('Mirror sem bencode válido: ' + url);
@@ -335,6 +375,13 @@ function extractHash(magnetOrHash: string): string {
   return (match ? match[1] : magnetOrHash).toLowerCase();
 }
 
+export interface CachedChunkEntry {
+  pieceIndex: number;
+  buffer: Buffer;
+  size: number;
+  accessedAt: number;
+}
+
 export class TorrentEngine {
   private enginesMap: Map<string, TorrentStream.TorrentEngine> = new Map();
   private pendingEnginesMap: Map<string, Promise<TorrentStream.TorrentEngine>> = new Map();
@@ -345,18 +392,188 @@ export class TorrentEngine {
   private mediaProbeCache: Map<string, ProbedMediaInfo | null> = new Map();
   private pendingProbeMap: Map<string, Promise<ProbedMediaInfo | null>> = new Map();
   private activeClientTranscodeMap: Map<string, () => void> = new Map();
+  private activeClientStreamByIp: Map<string, { hash: string; abort: () => void }> = new Map();
   private wireOptimizerIntervals: Map<string, NodeJS.Timeout> = new Map();
   private defaultTrackerPriority: TrackerPriorityMode = 'pt-br-stability';
   private portCursor: number = Math.floor(Math.random() * 8000);
   private sharedDht: any = null;
   private localRawServer: http.Server | null = null;
   private localRawPort: number = 0;
+  private engineChunkCaches: Map<string, Map<number, CachedChunkEntry>> = new Map();
+  private engineChunkCacheBytes: Map<string, number> = new Map();
+  private memoryWatchdogInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     this.initSharedDht();
     this.initLocalRawServer();
     this.startPeriodicSweeper();
+    this.startMemoryWatchdog();
     this.pruneDiskCache();
+  }
+
+  public getChunkFromCache(hash: string, pieceIndex: number): Buffer | null {
+    const cleanHash = hash.toLowerCase();
+    const cache = this.engineChunkCaches.get(cleanHash);
+    if (!cache) return null;
+    const entry = cache.get(pieceIndex);
+    if (!entry) return null;
+    entry.accessedAt = Date.now();
+    return entry.buffer;
+  }
+
+  public putChunkInCache(hash: string, pieceIndex: number, buffer: Buffer, startPiece?: number): void {
+    if (!buffer || buffer.length === 0) return;
+    const cleanHash = hash.toLowerCase();
+    let cache = this.engineChunkCaches.get(cleanHash);
+    if (!cache) {
+      cache = new Map();
+      this.engineChunkCaches.set(cleanHash, cache);
+      this.engineChunkCacheBytes.set(cleanHash, 0);
+    }
+
+    const currentTotalBytes = this.engineChunkCacheBytes.get(cleanHash) || 0;
+    const existingEntry = cache.get(pieceIndex);
+    const existingSize = existingEntry ? existingEntry.size : 0;
+    const delta = buffer.length - existingSize;
+
+    let newTotal = currentTotalBytes + delta;
+    if (newTotal > MAX_CHUNK_CACHE_PER_ENGINE_BYTES) {
+      const entries = Array.from(cache.entries());
+      entries.sort((a, b) => {
+        if (typeof startPiece === 'number') {
+          const distA = Math.abs(a[0] - startPiece);
+          const distB = Math.abs(b[0] - startPiece);
+          if (distA !== distB) return distB - distA;
+        }
+        return a[1].accessedAt - b[1].accessedAt;
+      });
+
+      for (const [pIndex, entry] of entries) {
+        if (newTotal <= MAX_CHUNK_CACHE_PER_ENGINE_BYTES * 0.75) break;
+        if (pIndex === pieceIndex) continue;
+        cache.delete(pIndex);
+        newTotal -= entry.size;
+      }
+    }
+
+    cache.set(pieceIndex, {
+      pieceIndex,
+      buffer,
+      size: buffer.length,
+      accessedAt: Date.now()
+    });
+    this.engineChunkCacheBytes.set(cleanHash, Math.max(0, newTotal));
+  }
+
+  public estimateEngineMemory(hash: string): number {
+    const cleanHash = hash.toLowerCase();
+    let total = this.engineChunkCacheBytes.get(cleanHash) || 0;
+
+    const readStreams = this.activeReadStreamsMap.get(cleanHash);
+    if (readStreams) {
+      for (const rs of readStreams) {
+        const queueLen = (rs as any)?._readableState?.length || 0;
+        total += queueLen;
+      }
+    }
+
+    const engine = this.enginesMap.get(cleanHash);
+    if (engine) {
+      const anyEng = engine as any;
+      const pieceLen = anyEng.torrent?.pieceLength || 1024 * 1024;
+      const criticalPieces = Array.isArray(anyEng._critical)
+        ? anyEng._critical.filter(Boolean).length
+        : 0;
+      total += criticalPieces * pieceLen;
+    }
+
+    return total;
+  }
+
+  public pruneEngineBuffers(hash: string, targetLimitBytes: number = 64 * 1024 * 1024): void {
+    const cleanHash = hash.toLowerCase();
+    const cache = this.engineChunkCaches.get(cleanHash);
+    if (cache) {
+      const meta = this.runtimeMetaMap.get(cleanHash);
+      const seekPiece = meta?.lastSeekOffset ? Math.floor(meta.lastSeekOffset / (1024 * 1024)) : 0;
+      let currentBytes = this.engineChunkCacheBytes.get(cleanHash) || 0;
+
+      for (const [pIndex, entry] of Array.from(cache.entries())) {
+        if (currentBytes <= targetLimitBytes) break;
+        if (pIndex < seekPiece || pIndex > seekPiece + 35) {
+          cache.delete(pIndex);
+          currentBytes -= entry.size;
+        }
+      }
+
+      if (currentBytes > targetLimitBytes) {
+        const sorted = Array.from(cache.entries()).sort((a, b) => a[1].accessedAt - b[1].accessedAt);
+        for (const [pIndex, entry] of sorted) {
+          if (currentBytes <= targetLimitBytes) break;
+          cache.delete(pIndex);
+          currentBytes -= entry.size;
+        }
+      }
+      this.engineChunkCacheBytes.set(cleanHash, Math.max(0, currentBytes));
+    }
+
+    const engine = this.enginesMap.get(cleanHash);
+    if (engine) {
+      try {
+        const store = (engine as any).store;
+        if (store && typeof store.close === 'function') {
+          store.close(() => {});
+        }
+      } catch {}
+    }
+  }
+
+  public evictInactiveEnginesExcept(activeHash: string): void {
+    const cleanActive = activeHash.toLowerCase();
+    for (const [hash] of Array.from(this.enginesMap.entries())) {
+      if (hash === cleanActive) continue;
+      const count = this.activeStreamsCount.get(hash) || 0;
+      if (count <= 0) {
+        console.log(`[TorrentEngine Lifecycle] Evitando motor inativo ao trocar de mídia/episódio: ${hash}`);
+        this.destroyEngine(hash, false);
+      }
+    }
+  }
+
+  public startMemoryWatchdog(): void {
+    if (this.memoryWatchdogInterval) return;
+    this.memoryWatchdogInterval = setInterval(() => {
+      try {
+        for (const [hash] of Array.from(this.enginesMap.entries())) {
+          const estimatedBytes = this.estimateEngineMemory(hash);
+          if (estimatedBytes > MAX_ENGINE_MEMORY_BYTES) {
+            console.warn(
+              `[TorrentEngine Watchdog] Engine ${hash} excedeu limite seguro (${Math.round(estimatedBytes / 1024 / 1024)}MB > 128MB). Forçando liberação de buffers e descritores.`
+            );
+            this.pruneEngineBuffers(hash, 48 * 1024 * 1024);
+            const activeCount = this.activeStreamsCount.get(hash) || 0;
+            if (activeCount <= 0) {
+              this.destroyEngine(hash, false);
+            }
+          }
+        }
+
+        const heapUsed = process.memoryUsage().heapUsed;
+        if (heapUsed > CONTAINER_HEAP_HIGH_WATERMARK) {
+          console.warn(
+            `[TorrentEngine Watchdog] Heap total (${Math.round(heapUsed / 1024 / 1024)}MB) atingiu marca alta (${Math.round(CONTAINER_HEAP_HIGH_WATERMARK / 1024 / 1024)}MB). Despejando motores inativos e acionando GC.`
+          );
+          this.evictOldestInactiveEngine();
+          for (const hash of this.enginesMap.keys()) {
+            this.pruneEngineBuffers(hash, 24 * 1024 * 1024);
+          }
+          if (typeof (global as any).gc === 'function') {
+            (global as any).gc();
+          }
+        }
+      } catch {}
+    }, 3000);
+    this.memoryWatchdogInterval.unref();
   }
 
   private initSharedDht() {
@@ -368,6 +585,18 @@ export class TorrentEngine {
           dht.setMaxListeners(100);
         }
         dht.on('error', () => {});
+        dht.on('peer', (peer: any, infoHash: any) => {
+          try {
+            if (!peer || !peer.host || !peer.port || !infoHash) return;
+            const h = Buffer.isBuffer(infoHash)
+              ? infoHash.toString('hex').toLowerCase()
+              : String(infoHash).toLowerCase();
+            const eng = this.enginesMap.get(h);
+            if (eng && typeof (eng as any).connect === 'function') {
+              (eng as any).connect(`${peer.host}:${peer.port}`);
+            }
+          } catch {}
+        });
         dht.listen(0);
         this.sharedDht = dht;
       }
@@ -397,6 +626,12 @@ export class TorrentEngine {
           }
 
           const fileSize = file.length;
+          const fileOffset = (file as any).offset || 0;
+          const pieceLength = (engine as any).torrent?.pieceLength || 1024 * 1024;
+          const fileFirstPiece = Math.floor(fileOffset / pieceLength);
+          const endPiece = Math.floor((fileOffset + fileSize - 1) / pieceLength);
+          const bitfield = (engine as any).bitfield;
+
           const parsed = parseHttpRange(req.headers.range, fileSize);
 
           if (parsed === 'unsatisfiable') {
@@ -405,13 +640,19 @@ export class TorrentEngine {
           }
 
           if (parsed === null) {
-            this.optimizePiecePriorities(engine, 0, file);
+            try {
+              if (!bitfield || typeof bitfield.get !== 'function' || !bitfield.get(fileFirstPiece)) {
+                (engine as any).critical?.(fileFirstPiece, 2);
+                (engine as any).select?.(fileFirstPiece, Math.min(endPiece, fileFirstPiece + 1), 120);
+              }
+            } catch {}
             res.writeHead(200, {
               'Content-Length': fileSize,
               'Accept-Ranges': 'bytes',
               'Content-Type': 'application/octet-stream'
             });
-            const rs = file.createReadStream();
+            const rs: any = file.createReadStream();
+            rs._isIndexProbe = true;
             this.registerReadStream(hash, rs);
             rs.on('error', () => {
               this.unregisterReadStream(hash, rs);
@@ -429,14 +670,34 @@ export class TorrentEngine {
           }
 
           const { start, end } = parsed;
-          this.optimizePiecePriorities(engine, start, file);
+          const reqStartPiece = Math.floor((fileOffset + start) / pieceLength);
+          const isHeaderOrTailProbe =
+            reqStartPiece <= fileFirstPiece + 1 || reqStartPiece >= Math.max(fileFirstPiece + 2, endPiece - 2);
+
+          if (isHeaderOrTailProbe) {
+            // Probe de EBML Header (peça 0) ou índice Matroska Cues no final do arquivo (últimas 2 peças):
+            // Prioriza imediatamente essas peças com prioridade máxima (120) SEM sobrescrever lastSeekOffset!
+            try {
+              const probeEndPiece = Math.min(endPiece, reqStartPiece + 1);
+              if (!bitfield || typeof bitfield.get !== 'function' || !bitfield.get(reqStartPiece)) {
+                (engine as any).critical?.(reqStartPiece, probeEndPiece - reqStartPiece + 1);
+                (engine as any).select?.(reqStartPiece, probeEndPiece, 120);
+              }
+            } catch {}
+          } else {
+            // Offset exato do cluster de vídeo pós-leitura do Cues pelo FFmpeg: foca 100% da janela aqui!
+            this.optimizePiecePriorities(engine, start, file);
+          }
+
           res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': end - start + 1,
             'Content-Type': 'application/octet-stream'
           });
-          const rs = file.createReadStream({ start, end });
+          const rs: any = file.createReadStream({ start, end });
+          rs._isIndexProbe = isHeaderOrTailProbe;
+          rs._isPlaybackStream = !isHeaderOrTailProbe;
           this.registerReadStream(hash, rs);
           rs.on('error', () => {
             this.unregisterReadStream(hash, rs);
@@ -470,6 +731,12 @@ export class TorrentEngine {
       this.activeReadStreamsMap.set(hash, new Set());
     }
     this.activeReadStreamsMap.get(hash)!.add(rs);
+    if (rs && typeof rs.once === 'function') {
+      const autoRemove = () => this.unregisterReadStream(hash, rs);
+      rs.once('end', autoRemove);
+      rs.once('close', autoRemove);
+      rs.once('error', autoRemove);
+    }
     const engine = this.enginesMap.get(hash);
     if (engine && typeof (engine.swarm as any)?.resume === 'function') {
       try {
@@ -484,12 +751,6 @@ export class TorrentEngine {
       set.delete(rs);
       if (set.size === 0) {
         this.activeReadStreamsMap.delete(hash);
-        const engine = this.enginesMap.get(hash);
-        if (engine && typeof (engine.swarm as any)?.pause === 'function') {
-          try {
-            (engine.swarm as any).pause();
-          } catch {}
-        }
       }
     }
   }
@@ -513,10 +774,14 @@ export class TorrentEngine {
    */
   async getOrAddEngine(
     magnetUri: string,
-    trackerPriority?: TrackerPriorityMode
+    trackerPriority?: TrackerPriorityMode,
+    targetOpts?: { fileIdx?: number; season?: number; episode?: number }
   ): Promise<TorrentStream.TorrentEngine> {
     const hash = extractHash(magnetUri);
     const activePriority = trackerPriority || this.defaultTrackerPriority;
+
+    // Evita acumulação de motores inativos ao trocar de episódio ou filme
+    this.evictInactiveEnginesExcept(hash);
 
     if (this.cleanupTimers.has(hash)) {
       clearTimeout(this.cleanupTimers.get(hash)!);
@@ -564,14 +829,17 @@ export class TorrentEngine {
         }
       } catch {}
 
-      const selectedTrackers = getTrackersForPriority(activePriority);
+      const selectedTrackers = Array.from(
+        new Set([...SUPER_TRACKERS, ...getTrackersForPriority(activePriority)])
+      ).filter((tr) => /^(udp|https?):\/\//i.test(tr));
       const engineOpts = {
+        tmp: CACHE_BASE_DIR,
         path: path.join(CACHE_BASE_DIR, hash),
         trackers: selectedTrackers,
-        dht: this.sharedDht || true,
+        dht: true,
         tracker: true,
-        connections: activePriority === 'ultra-speed' ? 140 : 100,
-        uploads: 6, // Essencial para desbloqueio rápido (tit-for-tat unchoke) junto aos seeds!
+        connections: activePriority === 'ultra-speed' ? 120 : 85,
+        uploads: 4,
         verify: false
       };
 
@@ -630,25 +898,53 @@ export class TorrentEngine {
           clearTimeout(timeout);
           this.enginesMap.set(hash, engine);
 
-          // Foca imediatamente toda a banda nos primeiros blocos + átomo moov
-          this.optimizePiecePriorities(engine, 0);
+          // Seleciona imediatamente o arquivo exato do episódio (ou filme) antes de priorizar as peças!
+          const initialTarget = this.findTargetVideoFile(
+            engine,
+            targetOpts?.fileIdx,
+            targetOpts?.season,
+            targetOpts?.episode
+          );
+          if (initialTarget) {
+            this.optimizePiecePriorities(engine, 0, initialTarget);
+          }
           this.startWireOptimizer(hash, engine);
+
+          engine.on('download', (pieceIndex: number) => {
+            try {
+              const meta = this.runtimeMetaMap.get(hash);
+              const pieceLength = (engine as any).torrent?.pieceLength || 1024 * 1024;
+              const target = this.getActiveTargetFile(hash, engine) || this.findMainVideoFile(engine);
+              const fileOffset = (target as any)?.offset || 0;
+              const currentSeekPiece = meta?.lastSeekOffset !== undefined
+                ? Math.floor((fileOffset + meta.lastSeekOffset) / pieceLength)
+                : 0;
+
+              const maxWindowPieces = Math.max(15, Math.ceil((PREFETCH_WINDOW_SECONDS * 600 * 1024) / pieceLength));
+              if (pieceIndex >= currentSeekPiece && pieceIndex <= currentSeekPiece + maxWindowPieces) {
+                const store = (engine as any).store;
+                if (store && typeof store.get === 'function') {
+                  store.get(pieceIndex, (err: any, buf: Buffer) => {
+                    if (!err && buf) {
+                      this.putChunkInCache(hash, pieceIndex, buf, currentSeekPiece);
+                    }
+                  });
+                }
+              }
+            } catch {}
+          });
 
           resolve(engine);
         });
 
         engine.on('error', (err: any) => {
-          if (resolved) return;
-          resolved = true;
           clearTimeout(timeout);
-          console.warn('[TorrentEngine] Erro na inicialização:', err?.message || err);
-          try {
-            engine.destroy(() => {});
-          } catch {}
-          this.enginesMap.delete(hash);
-          this.runtimeMetaMap.delete(hash);
-          this.stopWireOptimizer(hash);
-          reject(err);
+          console.warn('[TorrentEngine] Erro no motor P2P:', err?.message || err);
+          this.destroyEngine(hash, false);
+          if (!resolved) {
+            resolved = true;
+            reject(err);
+          }
         });
       });
     })();
@@ -674,6 +970,98 @@ export class TorrentEngine {
     return this.findTargetVideoFile(eng);
   }
 
+  private matchEpisodeInFileList(
+    candidateFiles: TorrentStream.TorrentFile[],
+    season?: number,
+    episode?: number
+  ): TorrentStream.TorrentFile | null {
+    if (typeof episode !== 'number' || episode <= 0 || candidateFiles.length === 0) {
+      return null;
+    }
+
+    const epNum = episode;
+    const epPadded = epNum.toString().padStart(2, '0');
+    const epPadded3 = epNum.toString().padStart(3, '0');
+    const sNum = typeof season === 'number' && season > 0 ? season : undefined;
+
+    // Ordena os arquivos naturalmente pelo caminho/nome para que S01E01 venha SEMPRE antes de S01E02
+    // mesmo que o dicionário do .torrent tenha os arquivos fora de ordem (ex: BluDV / Comando packs)
+    const sortedCandidates = [...candidateFiles].sort((a, b) => {
+      const pathA = String((a as any).path || a.name || '');
+      const pathB = String((b as any).path || b.name || '');
+      return pathA.localeCompare(pathB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    // Se a temporada foi especificada e existem pastas/nomes com outras temporadas, prioriza os da temporada certa
+    let seasonFiltered = sortedCandidates;
+    if (sNum) {
+      const seasonRegex = new RegExp(
+        `(?:[sS]0*${sNum}(?![0-9])|[sS]eason\\s*0*${sNum}(?![0-9])|[tT]emporada\\s*0*${sNum}(?![0-9])|\\b${sNum}x\\d+)`,
+        'i'
+      );
+      const matchingSeason = sortedCandidates.filter((f) =>
+        seasonRegex.test(String((f as any).path || f.name || ''))
+      );
+      if (matchingSeason.length > 0) {
+        seasonFiltered = matchingSeason;
+      }
+    }
+
+    // Usa (?!\d) em vez de \b porque no JS '_' é considerado caractere de palavra (\w),
+    // o que fazia S01E01\b falhar em 'Stranger_Things_S01E01_1080p.mkv'!
+    const strictPatterns: RegExp[] = [];
+    if (sNum) {
+      strictPatterns.push(new RegExp(`[sS]0*${sNum}[._\\s-]*[eE]p?0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+      strictPatterns.push(new RegExp(`(?:^|[^0-9])${sNum}x0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+      strictPatterns.push(new RegExp(`[sS]eason\\s*0*${sNum}.*?[eE]p?(?:isode)?\\.?\\s*0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+      strictPatterns.push(new RegExp(`[tT]emporada\\s*0*${sNum}.*?[eE]p?(?:is[oó]dio)?\\.?\\s*0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+    }
+    strictPatterns.push(new RegExp(`[sS]\\d+[._\\s-]*[eE]p?0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+    strictPatterns.push(new RegExp(`(?:^|[\\s._\\-\\[\\(])[eE]p?(?:isode|isodio|isódio)?\\.?[\\s._-]*0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+    strictPatterns.push(new RegExp(`(?:^|[\\s._\\-\\[\\(])cap(?:itulo|ítulo)?\\.?[\\s._-]*0*${epNum}(?:v\\d+)?(?!\\d)`, 'i'));
+
+    const stripTechNoise = (raw: string) =>
+      raw
+        .replace(/\b(2160p|1080p|720p|480p|360p|4k|uhd|fhd|hd)\b/gi, ' ')
+        .replace(/[._\s-](2160p|1080p|720p|480p|h264|x264|h265|x265|hevc|av1|10bit|8bit|hdr10|hdr|ddp5[._]?1|dd5[._]?1|aac2[._]?0|aac|ac3|eac3|5[._]1|7[._]1|2[._]0|dual|dublado|legendado)/gi, ' ')
+        .replace(/\b(19|20)\d{2}\b/g, ' ');
+
+    for (const pat of strictPatterns) {
+      const found = seasonFiltered.find((f) => {
+        const fullName = String((f as any).path || f.name || '');
+        return pat.test(stripTechNoise(fullName));
+      });
+      if (found) return found;
+    }
+
+    // Padrões numéricos para Animes (ex: "[SubGroup] Solo Leveling - 01 [1080p].mkv" ou "One Piece - 001.mp4")
+    const loosePatterns: RegExp[] = [
+      new RegExp(`[-_\\s\\[]0*${epNum}(?:v\\d+)?(?=[\\s_.\\]\\(]|$)`, 'i'),
+      new RegExp(`(?:^|[^0-9a-zA-Z])${epPadded3}(?!\\d)`),
+      new RegExp(`(?:^|[^0-9a-zA-Z])${epPadded}(?!\\d)`)
+    ];
+
+    for (const pat of loosePatterns) {
+      const found = seasonFiltered.find((f) => {
+        // Remove códigos de temporada (ex: S01, 1ª Temporada) para que 'S01' não bata com episódio '01' em S01E02!
+        const withoutSeasonAndTech = stripTechNoise(f.name)
+          .replace(/[sS]0*\d+[._\s-]*[eE]0*\d+/g, ' ')
+          .replace(/[sS]0*\d+/g, ' ')
+          .replace(/\d+[ªa]?\s*temporada/gi, ' ')
+          .replace(/season\s*0*\d+/gi, ' ');
+        return pat.test(withoutSeasonAndTech);
+      });
+      if (found) return found;
+    }
+
+    // Se o pack está ordenado e tem múltiplos episódios e o índice (epNum - 1) existe na temporada filtrada
+    if (seasonFiltered.length >= epNum && seasonFiltered.length > 1) {
+      return seasonFiltered[epNum - 1];
+    }
+
+    return null;
+  }
+
   findTargetVideoFile(
     engine: TorrentStream.TorrentEngine,
     fileIdx?: number,
@@ -685,79 +1073,67 @@ export class TorrentEngine {
     const hash = (engine as any).infoHash?.toLowerCase?.();
     const meta = hash ? this.runtimeMetaMap.get(hash) : undefined;
 
-    // 1. Se fileIdx explícito e válido for fornecido (ex: mapeado do Torrentio para série/anime)
-    if (typeof fileIdx === 'number' && fileIdx >= 0 && fileIdx < engine.files.length) {
-      const target = engine.files[fileIdx];
-      for (const f of engine.files) {
-        if (f !== target) {
-          try { (f as any).deselect?.(); } catch {}
-        }
-      }
-      try { (target as any).select?.(); } catch {}
-      if (meta) meta.targetFile = target;
-      return target;
-    }
-
     const videoExts = ['.mp4', '.mkv', '.webm', '.m4v', '.mov', '.avi', '.ts'];
-    const videoFiles = engine.files.filter((f) =>
+    const allVideoFiles = engine.files.filter((f) =>
       videoExts.some((ext) => f.name.toLowerCase().endsWith(ext))
     );
+    const nonSampleVideoFiles = allVideoFiles.filter(
+      (f) => !/\bsample\b/i.test(f.name) || f.length > 25 * 1024 * 1024
+    );
+    const videoFiles = nonSampleVideoFiles.length > 0 ? nonSampleVideoFiles : allVideoFiles;
     const candidateFiles = videoFiles.length > 0 ? videoFiles : engine.files;
 
-    // 2. Se for série ou anime com temporada/episódio especificado (ex: Naruto Shippuden)
-    if (typeof episode === 'number' && episode > 0) {
-      const epNum = episode;
-      const epPadded = epNum.toString().padStart(2, '0');
-      const epPadded3 = epNum.toString().padStart(3, '0');
-      const sNum = typeof season === 'number' && season > 0 ? season : undefined;
-
-      const patterns: RegExp[] = [];
-      if (sNum) {
-        patterns.push(new RegExp(`[sS]0*${sNum}[eE]0*${epNum}\\b`, 'i'));
-        patterns.push(new RegExp(`\\b${sNum}x0*${epNum}\\b`, 'i'));
-        patterns.push(new RegExp(`[sS]eason\\s*0*${sNum}.*?[eE]0*${epNum}\\b`, 'i'));
-      }
-      patterns.push(new RegExp(`[eE]0*${epNum}\\b`, 'i'));
-      patterns.push(new RegExp(`\\bep\\.?\\s*0*${epNum}\\b`, 'i'));
-      patterns.push(new RegExp(`\\bepisode\\s*0*${epNum}\\b`, 'i'));
-      patterns.push(new RegExp(`\\bcap(?:itulo)?\\.?\\s*0*${epNum}\\b`, 'i'));
-      patterns.push(new RegExp(`[-_\\s\\[]0*${epNum}(?:v\\d+)?(?=[\\s_.\\]\\(]|$)`, 'i'));
-      patterns.push(new RegExp(`\\b${epPadded3}\\b`));
-      patterns.push(new RegExp(`\\b${epPadded}\\b`));
-      if (epNum < 10) {
-        patterns.push(new RegExp(`\\b${epNum}\\b`));
-      }
-
-      for (const pat of patterns) {
-        const found = candidateFiles.find((f) => {
-          const cleanName = f.name.replace(/\b(1080p|720p|2160p|480p|h264|x264|h265|x265|hevc|10bit|aac)\b/gi, '');
-          return pat.test(cleanName);
-        });
-
-        if (found) {
-          // Desmarca imediatamente todos os outros episódios do pack (aumenta velocidade em até 50x)
-          for (const f of engine.files) {
-            if (f !== found) {
-              try { (f as any).deselect?.(); } catch {}
-            }
-          }
-          try { (found as any).select?.(); } catch {}
-          if (meta) meta.targetFile = found;
-          return found;
+    const selectOnlyTarget = (target: TorrentStream.TorrentFile) => {
+      for (const f of engine.files) {
+        if (f !== target) {
+          try {
+            (f as any).deselect?.();
+          } catch {}
         }
       }
-    }
+      if (meta) {
+        if (meta.targetFile && meta.targetFile !== target) {
+          meta.lastSeekOffset = 0;
+        }
+        meta.targetFile = target;
+      }
+      return target;
+    };
 
-    // 3. Fallback padrão: maior arquivo de vídeo
-    const main = candidateFiles.reduce((prev, curr) => (curr.length > prev.length ? curr : prev));
-    for (const f of engine.files) {
-      if (f !== main) {
-        try { (f as any).deselect?.(); } catch {}
+    // 1. Se for série ou anime com episódio especificado, garante correspondência exata do episódio!
+    if (typeof episode === 'number' && episode > 0) {
+      const matchedByEpisode = this.matchEpisodeInFileList(candidateFiles, season, episode);
+
+      if (typeof fileIdx === 'number' && fileIdx >= 0 && fileIdx < engine.files.length) {
+        const indexedFile = engine.files[fileIdx];
+        const isIndexedVideo = videoFiles.length === 0 || videoFiles.includes(indexedFile);
+
+        if (isIndexedVideo) {
+          if (!matchedByEpisode || matchedByEpisode === indexedFile) {
+            return selectOnlyTarget(indexedFile);
+          }
+          // Se fileIdx aponta para um arquivo cujo nome indica claramente OUTRO episódio (ex: E02 quando pedimos E01),
+          // confia no match exato do episódio em vez do fileIdx defasado!
+          return selectOnlyTarget(matchedByEpisode);
+        }
+      }
+
+      if (matchedByEpisode) {
+        return selectOnlyTarget(matchedByEpisode);
       }
     }
-    try { (main as any).select?.(); } catch {}
-    if (meta) meta.targetFile = main;
-    return main;
+
+    // 2. Se fileIdx explícito e válido de vídeo for fornecido (sem episódio específico ou fallback)
+    if (typeof fileIdx === 'number' && fileIdx >= 0 && fileIdx < engine.files.length) {
+      const target = engine.files[fileIdx];
+      if (videoFiles.length === 0 || videoFiles.includes(target)) {
+        return selectOnlyTarget(target);
+      }
+    }
+
+    // 3. Fallback padrão para filmes: maior arquivo de vídeo (ou primeiro em ordem natural se tamanhos similares)
+    const main = candidateFiles.reduce((prev, curr) => (curr.length > prev.length ? curr : prev));
+    return selectOnlyTarget(main);
   }
 
   findMainVideoFile(engine: TorrentStream.TorrentEngine): TorrentStream.TorrentFile | null {
@@ -883,8 +1259,8 @@ export class TorrentEngine {
   }
 
   /**
-   * Limpa seleções customizadas antigas (priority >= 10) sem tocar nos streams ativos (priority === 1)
-   * e aplica janela deslizante contínua à frente do cursor de leitura real!
+   * Limpa seleções customizadas antigas e força o cancelamento imediato de requisições de rede
+   * para peças anteriores a startPiece, garantindo que o vídeo comece do ponto de seek sem baixar desde o início!
    */
   private applyCleanPriorityWindow(
     engine: TorrentStream.TorrentEngine,
@@ -895,20 +1271,65 @@ export class TorrentEngine {
     try {
       const anyEngine = engine as any;
       const bitfield = anyEngine.bitfield;
+
+      // 1. Limpa da lista de seleções do torrent-stream qualquer intervalo que comece ou termine antes de startPiece
       if (Array.isArray(anyEngine.selection)) {
         for (let i = anyEngine.selection.length - 1; i >= 0; i--) {
-          if (anyEngine.selection[i].priority >= 10) {
+          const sel = anyEngine.selection[i];
+          if (!sel) continue;
+          if (sel.to < startPiece || sel.priority >= 10 || sel.priority === 0 || !sel.priority) {
             anyEngine.selection.splice(i, 1);
+          } else if (sel.from < startPiece) {
+            sel.from = startPiece;
+            sel.offset = 0;
           }
         }
       }
 
-      const endTailStart = Math.max(startPiece + 3, endPiece - 1);
+      // 2. Limpa o mapa interno de peças críticas (_critical) antes de startPiece para não reter peças antigas
+      if (Array.isArray(anyEngine._critical)) {
+        for (let p = 0; p < startPiece; p++) {
+          anyEngine._critical[p] = false;
+        }
+      }
+
+      // 3. Cancela requisições inflight nos wires P2P para peças anteriores a startPiece (BitTorrent CANCEL message)
+      const swarm = anyEngine.swarm;
+      const wires = Array.isArray(swarm?.wires) ? swarm.wires : [];
+      if (startPiece > 0 && wires.length > 0) {
+        for (const wire of wires) {
+          if (!wire || wire.destroyed || !Array.isArray(wire.requests)) continue;
+          for (let r = wire.requests.length - 1; r >= 0; r--) {
+            const req = wire.requests[r];
+            if (req && typeof req.piece === 'number' && req.piece < startPiece) {
+              try {
+                if (typeof wire.cancel === 'function') {
+                  wire.cancel(req.piece, req.offset, req.length);
+                }
+              } catch {}
+              wire.requests.splice(r, 1);
+            }
+          }
+        }
+      }
+
+      // 4. Limpa reservas de peças anteriores a startPiece
+      if (Array.isArray(anyEngine._reservations)) {
+        for (let p = 0; p < Math.min(startPiece, anyEngine._reservations.length); p++) {
+          anyEngine._reservations[p] = [];
+        }
+      }
+
+      const endTailStart = Math.max(startPiece + 3, endPiece - 2);
       const needsEndIndex =
         includeEndPieceForIndex &&
         endPiece > startPiece + 3 &&
-        (!bitfield || typeof bitfield.get !== 'function' || !bitfield.get(endPiece) || !bitfield.get(endTailStart));
+        (!bitfield ||
+          typeof bitfield.get !== 'function' ||
+          !bitfield.get(endPiece) ||
+          !bitfield.get(endTailStart));
 
+      // 5. Marca os primeiros blocos a partir de startPiece com prioridade crítica
       if (typeof anyEngine.critical === 'function') {
         const critWidth = Math.max(2, Math.min(4, endPiece - startPiece + 1));
         anyEngine.critical(startPiece, critWidth);
@@ -918,13 +1339,15 @@ export class TorrentEngine {
         }
       }
 
+      // 6. Configura janelas decrescentes de prioridade EXCLUSIVAMENTE a partir de startPiece para frente
       if (typeof anyEngine.select === 'function') {
-        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 3), 100);
-        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 12), 50);
-        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 25), 20);
         if (needsEndIndex) {
-          anyEngine.select(endTailStart, endPiece, 28);
+          anyEngine.select(endTailStart, endPiece, 120);
         }
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 2), 180);
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 18), 100);
+        anyEngine.select(startPiece, Math.min(endPiece, startPiece + 35), 40);
+        anyEngine.select(startPiece, endPiece, 10);
       }
 
       if (typeof anyEngine.flood === 'function') {
@@ -935,7 +1358,7 @@ export class TorrentEngine {
 
   /**
    * Avança automaticamente a janela de prioridade acompanhando o stream mais recente (stream._piece)
-   * e pré-carrega em segundo plano os 2 últimos blocos (índice Cues/moov) assim que a abertura já carregou!
+   * e preserva a posição de seek do usuário para jamais regredir a zero!
    */
   private advanceSlidingPieceWindow(hash: string, engine: TorrentStream.TorrentEngine) {
     const mainFile = this.getActiveTargetFile(hash, engine) || this.findMainVideoFile(engine);
@@ -950,22 +1373,36 @@ export class TorrentEngine {
       bitfield && typeof bitfield.get === 'function' && bitfield.get(fileFirstPiece)
     );
 
+    const meta = this.runtimeMetaMap.get(hash);
+    const metaSeekPiece = meta?.lastSeekOffset
+      ? Math.floor((fileOffset + meta.lastSeekOffset) / pieceLength)
+      : 0;
+
     const activeStreams = this.activeReadStreamsMap.get(hash);
     if (activeStreams && activeStreams.size > 0) {
-      const alive = Array.from(activeStreams).filter(
-        (rs) => rs && !rs._destroyed && typeof rs._piece === 'number'
+      const alivePlayback = Array.from(activeStreams).filter(
+        (rs) =>
+          rs &&
+          !rs._destroyed &&
+          !rs.readableEnded &&
+          !rs._isIndexProbe &&
+          typeof rs._piece === 'number' &&
+          (typeof rs._missing !== 'number' || rs._missing > 0)
       );
-      if (alive.length > 0) {
-        const newestStream = alive[alive.length - 1];
-        const targetPiece = Math.min(endPiece, newestStream._piece);
+      if (alivePlayback.length > 0) {
+        // Encontra a peça mais avançada entre os streams ativos
+        let maxStreamPiece = -1;
+        for (const s of alivePlayback) {
+          if (s._piece > maxStreamPiece) maxStreamPiece = s._piece;
+        }
+        const targetPiece = Math.max(metaSeekPiece, Math.min(endPiece, maxStreamPiece >= 0 ? maxStreamPiece : metaSeekPiece));
         this.applyCleanPriorityWindow(engine, targetPiece, endPiece, openingAlreadyCached);
         return;
       }
     }
 
-    const meta = this.runtimeMetaMap.get(hash);
-    const startPiece = Math.floor((fileOffset + (meta?.lastSeekOffset || 0)) / pieceLength);
-    this.applyCleanPriorityWindow(engine, startPiece, endPiece, openingAlreadyCached);
+    const startPiece = Math.max(metaSeekPiece, Math.floor((fileOffset + (meta?.lastSeekOffset || 0)) / pieceLength));
+    this.applyCleanPriorityWindow(engine, startPiece, endPiece, openingAlreadyCached || startPiece > 0);
   }
 
   /**
@@ -1111,14 +1548,23 @@ export class TorrentEngine {
       const pieceLength = (engine as any).torrent?.pieceLength || 1024 * 1024;
       const endPiece = Math.floor((fileOffset + mainFile.length - 1) / pieceLength);
 
-      // Usa o cursor REAL do stream ativo (stream._piece) sempre que disponível para nunca pular peças VBR!
+      // Usa o cursor REAL do stream de reprodução ativo (stream._piece) sempre que disponível para nunca pular peças VBR!
       let currentPiece = -1;
+      let hasActivePlaybackStream = false;
       const activeStreams = this.activeReadStreamsMap.get(hash);
       if (activeStreams && activeStreams.size > 0) {
-        for (const rs of activeStreams) {
-          if (rs && !rs._destroyed && typeof rs._piece === 'number') {
-            currentPiece = Math.max(currentPiece, rs._piece);
-          }
+        const alivePlayback = Array.from(activeStreams).filter(
+          (rs) =>
+            rs &&
+            !rs._destroyed &&
+            !rs.readableEnded &&
+            !rs._isIndexProbe &&
+            typeof rs._piece === 'number' &&
+            (typeof rs._missing !== 'number' || rs._missing > 0)
+        );
+        if (alivePlayback.length > 0) {
+          hasActivePlaybackStream = true;
+          currentPiece = alivePlayback[alivePlayback.length - 1]._piece;
         }
       }
       if (currentPiece < 0) {
@@ -1127,7 +1573,9 @@ export class TorrentEngine {
         currentPiece = Math.floor((fileOffset + currentByteOffset) / pieceLength);
       }
 
-      const prefetchCount = detectedSpeedBytesPerSec > 2.5 * 1024 * 1024 ? 6 : 4;
+      const pieceLenMB = pieceLength > 0 ? pieceLength : 1024 * 1024;
+      const targetPrefetchBytes = PREFETCH_WINDOW_SECONDS * Math.max(400 * 1024, detectedSpeedBytesPerSec);
+      const prefetchCount = Math.max(8, Math.min(25, Math.ceil(targetPrefetchBytes / pieceLenMB)));
       const startPrefetch = Math.min(endPiece, currentPiece);
       const endPrefetch = Math.min(endPiece, startPrefetch + prefetchCount - 1);
 
@@ -1136,7 +1584,19 @@ export class TorrentEngine {
         prefetchedPieces.push(p);
       }
 
-      this.applyCleanPriorityWindow(engine, startPrefetch, endPiece, false);
+      const fileFirstPiece = Math.floor(fileOffset / pieceLength);
+      const bitfield = (engine as any).bitfield;
+      const firstPieceReady = Boolean(
+        bitfield && typeof bitfield.get === 'function' && bitfield.get(fileFirstPiece)
+      );
+      if (this.runtimeMetaMap.has(hash) && currentTimeSeconds > 1 && !hasActivePlaybackStream) {
+        const dur = Math.max(1, durationSeconds);
+        this.runtimeMetaMap.get(hash)!.lastSeekOffset = Math.floor(
+          (Math.max(0, currentTimeSeconds) / dur) * mainFile.length
+        );
+      }
+
+      this.applyCleanPriorityWindow(engine, startPrefetch, endPiece, firstPieceReady || currentTimeSeconds > 1);
 
       return {
         success: true,
@@ -1149,10 +1609,20 @@ export class TorrentEngine {
     }
   }
 
-  async preload(magnetUri: string, trackerPriority?: TrackerPriorityMode): Promise<boolean> {
+  async preload(
+    magnetUri: string,
+    trackerPriority?: TrackerPriorityMode,
+    targetOpts?: { fileIdx?: number; season?: number; episode?: number }
+  ): Promise<boolean> {
     const hash = extractHash(magnetUri);
     try {
-      await this.getOrAddEngine(magnetUri, trackerPriority);
+      const engine = await this.getOrAddEngine(magnetUri, trackerPriority, targetOpts);
+      if (targetOpts && (typeof targetOpts.episode === 'number' || typeof targetOpts.fileIdx === 'number')) {
+        const target = this.findTargetVideoFile(engine, targetOpts.fileIdx, targetOpts.season, targetOpts.episode);
+        if (target) {
+          this.optimizePiecePriorities(engine, 0, target);
+        }
+      }
       // Agenda limpeza caso o usuário feche o modal sem dar play
       this.scheduleCleanup(hash, 75000);
       return true;
@@ -1178,9 +1648,10 @@ export class TorrentEngine {
     const hasPieceZero = Boolean(
       bitfield && typeof bitfield.get === 'function' && bitfield.get(firstPiece)
     );
+    const probeKey = `${hash}:${(file as any).path || file.name}`;
 
-    if (this.mediaProbeCache.has(hash) && hasPieceZero) {
-      return Promise.resolve({ info: this.mediaProbeCache.get(hash) || null, gotBytes: true });
+    if (this.mediaProbeCache.has(probeKey) && hasPieceZero) {
+      return Promise.resolve({ info: this.mediaProbeCache.get(probeKey) || null, gotBytes: true });
     }
 
     return new Promise<{ info: ProbedMediaInfo | null; gotBytes: boolean }>((resolve) => {
@@ -1191,7 +1662,10 @@ export class TorrentEngine {
       }
 
       try {
-        (engine as any).critical?.(firstPiece, 1);
+        if (typeof (engine.swarm as any)?.resume === 'function') {
+          (engine.swarm as any).resume();
+        }
+        (engine as any).critical?.(firstPiece, 2);
         const wires = (engine as any).swarm?.wires;
         if (Array.isArray(wires)) {
           for (const w of wires) {
@@ -1211,9 +1685,12 @@ export class TorrentEngine {
       const finish = async (buf: Buffer | null) => {
         if (done) return;
         done = true;
-        try {
-          if (rs) rs.destroy();
-        } catch {}
+        if (rs) {
+          this.unregisterReadStream(hash, rs);
+          try {
+            rs.destroy();
+          } catch {}
+        }
         if (!buf || buf.length === 0) {
           resolve({ info: null, gotBytes: false });
           return;
@@ -1222,13 +1699,13 @@ export class TorrentEngine {
           resolve({ info: null, gotBytes: true });
           return;
         }
-        if (this.mediaProbeCache.has(hash)) {
-          resolve({ info: this.mediaProbeCache.get(hash) || null, gotBytes: true });
+        if (this.mediaProbeCache.has(probeKey)) {
+          resolve({ info: this.mediaProbeCache.get(probeKey) || null, gotBytes: true });
           return;
         }
         const info = await transcoder.probeBufferStreams(buf);
         if (info) {
-          this.mediaProbeCache.set(hash, info);
+          this.mediaProbeCache.set(probeKey, info);
         }
         resolve({ info, gotBytes: true });
       };
@@ -1239,6 +1716,7 @@ export class TorrentEngine {
 
       try {
         rs = file.createReadStream({ start: 0, end: readLen });
+        this.registerReadStream(hash, rs);
         rs.on('data', (chunk: Buffer) => {
           chunks.push(chunk);
           total += chunk.length;
@@ -1332,8 +1810,22 @@ export class TorrentEngine {
   }
 
   /**
-   * Streaming HTTP 206 Partial Content (MP4/WebM) ou Remuxing FFmpeg nativo em tempo real (MKV Dual Áudio PT-BR)
-   * com suporte a seek exato por tempo (`seekSeconds`), zero congelamento inicial e áudio 100% sincronizado!
+   * FASE 4: Fecha automaticamente qualquer stream anterior do mesmo usuario/IP ao trocar de faixa ou abrir novo video
+   */
+  private registerClientActiveStream(clientIp: string, hash: string, abortFn: () => void) {
+    const prev = this.activeClientStreamByIp.get(clientIp);
+    if (prev && prev.hash !== hash) {
+      try {
+        prev.abort();
+      } catch {}
+    }
+    this.activeClientStreamByIp.set(clientIp, { hash, abort: abortFn });
+  }
+
+  /**
+   * Streaming HTTP 206 Partial Content (MP4/WebM) ou Remuxing FFmpeg nativo em tempo real (MKV Dual Audio PT-BR)
+   * com Health Check de 5 segundos (Fase 2) para downgrade automatico de qualidade (ex: 1080p -> 720p)
+   * e blindagem de memoria (Fase 4) em req.on('close'), req.on('end') e res.on('error').
    */
   async handleStreamRequest(
     req: Request,
@@ -1343,15 +1835,43 @@ export class TorrentEngine {
     audioOnly: boolean = false,
     trackerPriority?: TrackerPriorityMode,
     extra: StreamExtraOptions = {}
-  ) {
+  ): Promise<void> {
     const hash = extractHash(magnetUri);
+    const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'local')
+      .split(',')[0]
+      .trim();
     this.touchActivity(hash);
 
-    const engine = await this.getOrAddEngine(magnetUri, trackerPriority);
+    let engine: TorrentStream.TorrentEngine;
+    try {
+      engine = await this.getOrAddEngine(magnetUri, trackerPriority, {
+        fileIdx: extra.fileIdx,
+        season: extra.season,
+        episode: extra.episode
+      });
+    } catch (err) {
+      if (extra.fallbackMagnet && !extra.isFallbackAttempt) {
+        this.destroyEngine(hash, true);
+        const fbQual = extra.fallbackQuality || '720p';
+        res.setHeader('X-Popoca-Quality-Fallback', fbQual);
+        res.setHeader(
+          'X-Popoca-Fallback-Message',
+          `Conexão ajustada para ${fbQual} para reprodução imediata`
+        );
+        return this.handleStreamRequest(req, res, extra.fallbackMagnet, forceTranscode, audioOnly, trackerPriority, {
+          ...extra,
+          fileIdx: extra.fallbackFileIdx,
+          fallbackMagnet: undefined,
+          isFallbackAttempt: true
+        });
+      }
+      throw err;
+    }
+
     const file = this.findTargetVideoFile(engine, extra.fileIdx, extra.season, extra.episode);
 
     if (!file) {
-      this.scheduleCleanup(hash, 10000);
+      this.scheduleCleanup(hash, 5000);
       throw new Error('VIDEO_FILE_NOT_FOUND: Arquivo de vídeo não encontrado no torrent.');
     }
 
@@ -1362,22 +1882,33 @@ export class TorrentEngine {
 
     res.setHeader(
       'Access-Control-Expose-Headers',
-      'X-Popoca-Stream-Mode, X-Popoca-Active-Hash, X-Popoca-Real-Lang, Content-Range, Accept-Ranges'
+      'X-Popoca-Stream-Mode, X-Popoca-Active-Hash, X-Popoca-Real-Lang, X-Popoca-Quality-Fallback, X-Popoca-Fallback-Message, Content-Range, Accept-Ranges'
     );
+
+    const hasFallback = Boolean(extra.fallbackMagnet && !extra.isFallbackAttempt && seekSec === 0);
+    const canFailoverQuickly = Boolean((hasFallback || extra.hasAlternatives) && seekSec === 0);
+    const activeWiresCount = Array.isArray((engine.swarm as any)?.wires)
+      ? (engine.swarm as any).wires.filter((w: any) => w && !w.destroyed).length
+      : 0;
+    const healthTimeoutMs =
+      canFailoverQuickly && activeWiresCount === 0 && ((engine.swarm as any)?.downloaded || 0) === 0
+        ? HEALTH_CHECK_TIMEOUT_MS
+        : canFailoverQuickly
+        ? 6500
+        : 14000;
 
     if (needsTranscode) {
       const rangeHeader = req.headers.range;
       if (rangeHeader && rangeHeader.startsWith('bytes=')) {
         const rangeStart = parseInt(rangeHeader.replace(/bytes=/, '').split('-')[0], 10);
         if (!isNaN(rangeStart) && rangeStart > 0) {
-          this.scheduleCleanup(hash, 45000);
+          this.scheduleCleanup(hash, 30000);
           res.status(416).end();
           return;
         }
       }
 
-      // Cancela imediatamente qualquer job FFmpeg anterior deste mesmo cliente/torrent para liberar 100% da banda P2P no seek!
-      const clientKey = `${req.ip || 'local'}:${hash}`;
+      const clientKey = `${clientIp}:${hash}`;
       const prevCancel = this.activeClientTranscodeMap.get(clientKey);
       if (prevCancel) {
         this.activeClientTranscodeMap.delete(clientKey);
@@ -1395,24 +1926,65 @@ export class TorrentEngine {
         bitfield && typeof bitfield.get === 'function' && bitfield.get(endPiece)
       );
 
-      // Se o usuário pediu seek distante (ex: 30min ou Continuar Assistindo) e o índice Cues ainda não baixou,
-      // marca imediatamente tanto a peça 0 quanto as 2 últimas peças (Cues) como críticas em paralelo!
-      const useHttpLoopbackSeek =
-        seekSec > 1.5 && this.localRawPort > 0 && (seekSec >= 18 || endIndexCached);
+      const useHttpLoopbackSeek = seekSec > 1.5 && this.localRawPort > 0;
 
-      if (useHttpLoopbackSeek && !endIndexCached) {
-        this.applyCleanPriorityWindow(engine, fileFirstPiece, endPiece, true);
-      } else if (!useHttpLoopbackSeek) {
+      if (useHttpLoopbackSeek) {
+        const meta = this.runtimeMetaMap.get(hash);
+        const estOffset =
+          meta?.lastSeekOffset && meta.lastSeekOffset > 0
+            ? meta.lastSeekOffset
+            : Math.min(file.length - 1, Math.floor((seekSec / 6600) * file.length));
+        const estStartPiece = Math.floor((fileOffset + estOffset) / pieceLength);
+        this.applyCleanPriorityWindow(engine, estStartPiece, endPiece, true);
+        if (!endIndexCached) {
+          try {
+            (engine as any).critical?.(Math.max(fileFirstPiece, endPiece - 1), 2);
+          } catch {}
+        }
+      } else {
         this.optimizePiecePriorities(engine, 0, file);
       }
 
-      const { info: probedInfo, gotBytes } = await this.getOrProbeMediaInfo(hash, engine, file, 16000);
+      // FASE 2: Health Check de 5 segundos na qualidade escolhida (apenas em cold start seekSec === 0)
+      const { info: probedInfo, gotBytes } = await this.getOrProbeMediaInfo(
+        hash,
+        engine,
+        file,
+        healthTimeoutMs
+      );
       if (req.destroyed || res.writableEnded) {
-        this.scheduleCleanup(hash, 45000);
+        this.scheduleCleanup(hash, 15000);
         return;
       }
+
       if (!gotBytes) {
-        this.scheduleCleanup(hash, 1500);
+        if (hasFallback && extra.fallbackMagnet) {
+          const fbQual = extra.fallbackQuality || '720p';
+          console.log(
+            `[Health Check 5s] Qualidade ${extra.preferredQuality || '1080p'} sem velocidade suficiente em 5s. Fazendo downgrade automatico para ${fbQual}.`
+          );
+          this.scheduleCleanup(hash, 5000);
+          res.setHeader('X-Popoca-Quality-Fallback', fbQual);
+          res.setHeader(
+            'X-Popoca-Fallback-Message',
+            `Conexão ajustada para ${fbQual} para reprodução imediata`
+          );
+          return this.handleStreamRequest(
+            req,
+            res,
+            extra.fallbackMagnet,
+            forceTranscode,
+            audioOnly,
+            trackerPriority,
+            {
+              ...extra,
+              fileIdx: extra.fallbackFileIdx,
+              fallbackMagnet: undefined,
+              isFallbackAttempt: true
+            }
+          );
+        }
+        this.scheduleCleanup(hash, 5000);
         throw new Error('P2P_SWARM_NO_BYTES: Nenhum peer entregou blocos a tempo.');
       }
 
@@ -1451,8 +2023,11 @@ export class TorrentEngine {
         }
         if (directReadStream) {
           this.unregisterReadStream(hash, directReadStream);
+          try {
+            directReadStream.destroy();
+          } catch {}
         }
-        this.scheduleCleanup(hash, 45000);
+        this.scheduleCleanup(hash, 25000);
       };
 
       const transcodeJob = transcoder.transcodeStream(inputSource, res, {
@@ -1474,8 +2049,11 @@ export class TorrentEngine {
         triggerOnceCleanup();
       };
       this.activeClientTranscodeMap.set(clientKey, abortCurrentTranscode);
+      this.registerClientActiveStream(clientIp, hash, abortCurrentTranscode);
 
       req.on('close', abortCurrentTranscode);
+      req.on('end', abortCurrentTranscode);
+      res.on('error', abortCurrentTranscode);
 
       return;
     }
@@ -1484,7 +2062,7 @@ export class TorrentEngine {
     const parsedRange = parseHttpRange(req.headers.range, fileSize);
 
     if (parsedRange === 'unsatisfiable') {
-      this.scheduleCleanup(hash, 60000);
+      this.scheduleCleanup(hash, 30000);
       res.status(416).setHeader('Content-Range', `bytes */${fileSize}`).end();
       return;
     }
@@ -1493,45 +2071,123 @@ export class TorrentEngine {
       this.optimizePiecePriorities(engine, 0, file);
 
       res.setHeader('X-Popoca-Stream-Mode', 'native');
+      res.setHeader('X-Popoca-Active-Hash', hash);
       res.setHeader('Content-Type', 'video/mp4');
       res.setHeader('Content-Length', fileSize);
       res.setHeader('Accept-Ranges', 'bytes');
       const readStream = file.createReadStream();
       this.registerReadStream(hash, readStream);
-      readStream.on('error', () => {
-        this.unregisterReadStream(hash, readStream);
-        try { readStream.destroy(); } catch {}
-        if (!res.headersSent) res.status(500).end();
-      });
-      readStream.pipe(res);
 
-      req.on('close', () => {
+      let closed = false;
+      const cleanupFullStream = () => {
+        if (closed) return;
+        closed = true;
         this.unregisterReadStream(hash, readStream);
         try {
           readStream.destroy();
         } catch {}
-        this.scheduleCleanup(hash, 60000);
+        this.scheduleCleanup(hash, 25000);
+      };
+
+      readStream.on('error', () => {
+        cleanupFullStream();
+        if (!res.headersSent) res.status(500).end();
       });
+      readStream.pipe(res);
+
+      req.on('close', cleanupFullStream);
+      req.on('end', cleanupFullStream);
+      res.on('error', cleanupFullStream);
       return;
     }
 
     const { start, end } = parsedRange;
 
+    // Prioriza imediatamente as peças a partir de 'start' do arquivo ANTES do probe para que episódios MP4 em Season Packs (offset > 0) baixem na hora!
+    this.optimizePiecePriorities(engine, start, file);
+
     if (start === 0) {
-      const { gotBytes } = await this.getOrProbeMediaInfo(hash, engine, file, 16000);
+      const { gotBytes } = await this.getOrProbeMediaInfo(hash, engine, file, healthTimeoutMs);
       if (req.destroyed || res.writableEnded) {
-        this.scheduleCleanup(hash, 45000);
+        this.scheduleCleanup(hash, 15000);
         return;
       }
       if (!gotBytes) {
-        this.scheduleCleanup(hash, 1500);
+        if (hasFallback && extra.fallbackMagnet) {
+          const fbQual = extra.fallbackQuality || '720p';
+          console.log(
+            `[Health Check 5s] Qualidade ${extra.preferredQuality || '1080p'} sem velocidade suficiente em 5s. Fazendo downgrade automatico para ${fbQual}.`
+          );
+          this.scheduleCleanup(hash, 5000);
+          res.setHeader('X-Popoca-Quality-Fallback', fbQual);
+          res.setHeader(
+            'X-Popoca-Fallback-Message',
+            `Conexão ajustada para ${fbQual} para reprodução imediata`
+          );
+          return this.handleStreamRequest(
+            req,
+            res,
+            extra.fallbackMagnet,
+            forceTranscode,
+            audioOnly,
+            trackerPriority,
+            {
+              ...extra,
+              fileIdx: extra.fallbackFileIdx,
+              fallbackMagnet: undefined,
+              isFallbackAttempt: true
+            }
+          );
+        }
+        this.scheduleCleanup(hash, 5000);
         throw new Error('P2P_SWARM_NO_BYTES: Nenhum peer entregou blocos MP4 a tempo.');
       }
     }
 
-    this.optimizePiecePriorities(engine, start, file);
-
     const chunkSize = end - start + 1;
+    const pieceLength = (engine as any).torrent?.pieceLength || 1024 * 1024;
+    const fileOffset = (file as any).offset || 0;
+    const absStart = fileOffset + start;
+    const absEnd = fileOffset + end;
+    const startPiece = Math.floor(absStart / pieceLength);
+    const endPieceReq = Math.floor(absEnd / pieceLength);
+
+    // Se todas as peças do range solicitado estiverem em memória no cache inteligente, serve imediatamente
+    let allCached = true;
+    for (let p = startPiece; p <= endPieceReq; p++) {
+      if (!this.getChunkFromCache(hash, p)) {
+        allCached = false;
+        break;
+      }
+    }
+
+    if (allCached) {
+      const pieceBuffers: Buffer[] = [];
+      for (let p = startPiece; p <= endPieceReq; p++) {
+        const b = this.getChunkFromCache(hash, p);
+        if (b) pieceBuffers.push(b);
+      }
+      const combined = Buffer.concat(pieceBuffers);
+      const pieceStartByte = startPiece * pieceLength;
+      const sliceStart = absStart - pieceStartByte;
+      const sliceLen = chunkSize;
+      if (sliceStart >= 0 && sliceStart + sliceLen <= combined.length) {
+        const slice = combined.subarray(sliceStart, sliceStart + sliceLen);
+        res.writeHead(206, {
+          'X-Popoca-Stream-Mode': 'native-cache',
+          'X-Popoca-Active-Hash': hash,
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': slice.length,
+          'Content-Type': 'video/mp4',
+          'Cache-Control': 'no-cache'
+        });
+        res.end(slice);
+        this.scheduleCleanup(hash, 25000);
+        return;
+      }
+    }
+
     res.writeHead(206, {
       'X-Popoca-Stream-Mode': 'native',
       'X-Popoca-Active-Hash': hash,
@@ -1544,20 +2200,161 @@ export class TorrentEngine {
 
     const chunkStream = file.createReadStream({ start, end });
     this.registerReadStream(hash, chunkStream);
-    chunkStream.on('error', () => {
-      this.unregisterReadStream(hash, chunkStream);
-      try { chunkStream.destroy(); } catch {}
-      if (!res.headersSent) res.status(500).end();
-    });
-    chunkStream.pipe(res);
 
-    req.on('close', () => {
+    let chunkClosed = false;
+    const cleanupChunkStream = () => {
+      if (chunkClosed) return;
+      chunkClosed = true;
       this.unregisterReadStream(hash, chunkStream);
       try {
         chunkStream.destroy();
       } catch {}
-      this.scheduleCleanup(hash, 60000);
+      this.scheduleCleanup(hash, 25000);
+    };
+
+    chunkStream.on('error', () => {
+      cleanupChunkStream();
+      if (!res.headersSent) res.status(500).end();
     });
+    chunkStream.pipe(res);
+
+    req.on('close', cleanupChunkStream);
+    req.on('end', cleanupChunkStream);
+    res.on('error', cleanupChunkStream);
+  }
+
+  /**
+   * FASE 3: Muxing Hibrido em Tempo Real (Video 4K/1080p EN + Audio 720p PT-BR)
+   * Inicia duas instancias leves do torrent-stream com Super Trackers ativados e passa os streams
+   * de leitura para o fluent-ffmpeg (-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 192k -ac 2)
+   * entregando Fragmented MP4 via .pipe(res).
+   */
+  async handleHybridStreamRequest(
+    req: Request,
+    res: Response,
+    videoMagnet: string,
+    audioMagnet: string,
+    options: {
+      seekSeconds?: number;
+      audioDelayMs?: number;
+      trackerPriority?: TrackerPriorityMode;
+      season?: number;
+      episode?: number;
+    } = {}
+  ): Promise<void> {
+    const videoHash = extractHash(videoMagnet);
+    const audioHash = extractHash(audioMagnet);
+    const clientIp = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'local')
+      .split(',')[0]
+      .trim();
+
+    const [videoEngine, audioEngine] = await Promise.all([
+      this.getOrAddEngine(videoMagnet, options.trackerPriority),
+      this.getOrAddEngine(audioMagnet, options.trackerPriority)
+    ]);
+
+    const videoFile = this.findTargetVideoFile(videoEngine, undefined, options.season, options.episode);
+    const audioFile = this.findTargetVideoFile(audioEngine, undefined, options.season, options.episode);
+
+    if (!videoFile || !audioFile) {
+      this.scheduleCleanup(videoHash, 5000);
+      this.scheduleCleanup(audioHash, 5000);
+      throw new Error('HYBRID_FILES_NOT_FOUND: Arquivos de vídeo ou áudio não encontrados nos torrents.');
+    }
+
+    this.optimizePiecePriorities(videoEngine, 0, videoFile);
+    this.optimizePiecePriorities(audioEngine, 0, audioFile);
+
+    const [vProbe, aProbe] = await Promise.all([
+      this.getOrProbeMediaInfo(videoHash, videoEngine, videoFile, 12000),
+      this.getOrProbeMediaInfo(audioHash, audioEngine, audioFile, 12000)
+    ]);
+
+    if (req.destroyed || res.writableEnded) {
+      this.scheduleCleanup(videoHash, 10000);
+      this.scheduleCleanup(audioHash, 10000);
+      return;
+    }
+
+    if (!vProbe.gotBytes || !aProbe.gotBytes) {
+      this.scheduleCleanup(videoHash, 2000);
+      this.scheduleCleanup(audioHash, 2000);
+      throw new Error('HYBRID_SWARM_NO_BYTES: Enxame híbrido sem peers suficientes no momento.');
+    }
+
+    res.status(200);
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'X-Popoca-Stream-Mode, X-Popoca-Active-Hash, X-Popoca-Audio-Hash'
+    );
+    res.setHeader('X-Popoca-Stream-Mode', 'hybrid-mux');
+    res.setHeader('X-Popoca-Active-Hash', videoHash);
+    res.setHeader('X-Popoca-Audio-Hash', audioHash);
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
+    }
+
+    const seekSec = options.seekSeconds && options.seekSeconds > 0 ? options.seekSeconds : 0;
+    const useLoopback = seekSec > 1.5 && this.localRawPort > 0;
+
+    let videoReadStream: any = null;
+    let audioReadStream: any = null;
+    let videoInput: any;
+    let audioInput: any;
+
+    if (useLoopback) {
+      videoInput = `http://127.0.0.1:${this.localRawPort}/raw/${videoHash}`;
+      audioInput = `http://127.0.0.1:${this.localRawPort}/raw/${audioHash}`;
+    } else {
+      videoReadStream = videoFile.createReadStream();
+      audioReadStream = audioFile.createReadStream();
+      this.registerReadStream(videoHash, videoReadStream);
+      this.registerReadStream(audioHash, audioReadStream);
+      videoInput = videoReadStream;
+      audioInput = audioReadStream;
+    }
+
+    let cleaned = false;
+    const cleanupHybrid = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (videoReadStream) {
+        this.unregisterReadStream(videoHash, videoReadStream);
+        try {
+          videoReadStream.destroy();
+        } catch {}
+      }
+      if (audioReadStream) {
+        this.unregisterReadStream(audioHash, audioReadStream);
+        try {
+          audioReadStream.destroy();
+        } catch {}
+      }
+      this.scheduleCleanup(videoHash, 10000);
+      this.scheduleCleanup(audioHash, 10000);
+    };
+
+    const hybridJob = transcoder.transcodeHybridStream(videoInput, audioInput, res, {
+      seekSeconds: seekSec > 1.5 ? seekSec : undefined,
+      audioDelayMs: options.audioDelayMs,
+      onCancel: cleanupHybrid
+    });
+
+    const abortHybrid = () => {
+      try {
+        hybridJob.cancel();
+      } catch {}
+      cleanupHybrid();
+    };
+
+    this.registerClientActiveStream(clientIp, `${videoHash}+${audioHash}`, abortHybrid);
+
+    req.on('close', abortHybrid);
+    req.on('end', abortHybrid);
+    res.on('error', abortHybrid);
   }
 
   getStats(magnetUri: string): ActiveTorrentStats | null {
@@ -1660,7 +2457,7 @@ export class TorrentEngine {
   }
 
   /**
-   * Destrói completamente uma instância do motor torrent, limpando streams e memória.
+   * Destrói completamente uma instância do motor torrent, limpando streams, descritores de arquivo e memória.
    */
   public destroyEngine(hash: string, removeDiskCache: boolean = false): void {
     const cleanHash = hash.toLowerCase();
@@ -1670,6 +2467,7 @@ export class TorrentEngine {
     }
     this.stopWireOptimizer(cleanHash);
 
+    // 1. Destrói todos os streams de leitura ativos do motor imediatamente
     const activeStreams = this.activeReadStreamsMap.get(cleanHash);
     if (activeStreams) {
       for (const rs of activeStreams) {
@@ -1680,17 +2478,48 @@ export class TorrentEngine {
       this.activeReadStreamsMap.delete(cleanHash);
     }
 
+    // 2. Aborta transcodes ativos do FFmpeg vinculados a este hash
+    for (const [clientKey, abortFn] of Array.from(this.activeClientTranscodeMap.entries())) {
+      if (clientKey.endsWith(`:${cleanHash}`)) {
+        try {
+          abortFn();
+        } catch {}
+        this.activeClientTranscodeMap.delete(clientKey);
+      }
+    }
+
+    // 3. Aborta streams de IP do cliente vinculados a este hash
+    for (const [ip, item] of Array.from(this.activeClientStreamByIp.entries())) {
+      if (item.hash.includes(cleanHash)) {
+        try {
+          item.abort();
+        } catch {}
+        this.activeClientStreamByIp.delete(ip);
+      }
+    }
+
+    // 4. Fecha descritores de arquivo (random-access-file) e destrói o motor torrent-stream
     const engine = this.enginesMap.get(cleanHash);
     if (engine) {
+      try {
+        const store = (engine as any).store;
+        if (store && typeof store.close === 'function') {
+          store.close(() => {});
+        }
+      } catch {}
       try {
         engine.destroy(() => {});
       } catch {}
     }
 
     this.enginesMap.delete(cleanHash);
+    this.pendingEnginesMap.delete(cleanHash);
     this.runtimeMetaMap.delete(cleanHash);
     this.activeStreamsCount.delete(cleanHash);
     this.mediaProbeCache.delete(cleanHash);
+    this.pendingProbeMap.delete(cleanHash);
+    this.engineChunkCaches.delete(cleanHash);
+    this.engineChunkCacheBytes.delete(cleanHash);
 
     if (removeDiskCache) {
       const torrentDir = path.join(CACHE_BASE_DIR, cleanHash);

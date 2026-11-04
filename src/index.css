@@ -6,7 +6,7 @@
     --popoca-accent: #ffffff;
     --popoca-dark: #07090e;
     --popoca-surface: #11151f;
-    --popoca-border: rgba(255, 255, 255, 0.1);
+    --popoca-border: rgba(255, 255, 255, 0.12);
   }
 
   html.light {
@@ -24,115 +24,141 @@
 }
 
 /* =========================================================================
-   Apple TV+ Liquid Glass System (Obsidian Dark & Frosted Alabaster Light)
+   Liquid Glass Real (Blindado para Produção Vercel e GPU Mobile)
+   - -webkit-backdrop-filter obrigatoriamente ANTES da propriedade padrão
+   - Aceleração de GPU Forçada: transform: translate3d(0, 0, 0) + will-change
+   - Isolamento de Stacking Context: isolation: isolate
    ========================================================================= */
 
-/* Dark Mode Liquid Glass */
-.glass-panel {
-  background: rgba(18, 22, 31, 0.62);
-  backdrop-filter: blur(36px) saturate(195%);
-  -webkit-backdrop-filter: blur(36px) saturate(195%);
-  border: 1px solid rgba(255, 255, 255, 0.11);
+.liquid-glass,
+.glass-panel,
+.glass-capsule {
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.55) 0%, rgba(18, 18, 22, 0.35) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: backdrop-filter, transform;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.04);
+    0 8px 32px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 }
 
-.glass-capsule {
-  background: rgba(18, 22, 32, 0.68);
-  backdrop-filter: blur(36px) saturate(200%);
-  -webkit-backdrop-filter: blur(36px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.13);
+.liquid-glass-heavy,
+.glass-dropdown {
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.78) 0%, rgba(18, 18, 22, 0.62) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  backdrop-filter: blur(24px) saturate(190%);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: backdrop-filter, transform;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 18px 44px -10px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0.5px 0 rgba(255, 255, 255, 0.2),
-    inset 0 -1px 0 0 rgba(255, 255, 255, 0.04);
+    0 8px 32px 0 rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18);
 }
 
 .glass-subtle {
-  background: rgba(255, 255, 255, 0.055);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-}
-
-.glass-dropdown {
-  background: rgba(13, 16, 24, 0.9);
-  backdrop-filter: blur(42px) saturate(200%);
-  -webkit-backdrop-filter: blur(42px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.45) 0%, rgba(18, 18, 22, 0.28) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: backdrop-filter, transform;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 30px 70px rgba(0, 0, 0, 0.68),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+    0 8px 32px 0 rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 }
 
 /* Light Mode Liquid Glass — High-Contrast Frosted Crystal */
-html.light .glass-panel {
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(36px) saturate(190%);
-  -webkit-backdrop-filter: blur(36px) saturate(190%);
+html.light .liquid-glass,
+html.light .glass-panel,
+html.light .glass-capsule {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82) 0%, rgba(245, 247, 250, 0.68) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
   border: 1px solid rgba(15, 23, 42, 0.09);
   box-shadow:
-    0 18px 42px -12px rgba(15, 23, 42, 0.1),
-    0 2px 6px rgba(15, 23, 42, 0.04),
+    0 8px 32px 0 rgba(15, 23, 42, 0.1),
     inset 0 1px 0 0 rgba(255, 255, 255, 0.96);
 }
 
-html.light .glass-capsule {
-  background: rgba(255, 255, 255, 0.84);
-  backdrop-filter: blur(36px) saturate(195%);
-  -webkit-backdrop-filter: blur(36px) saturate(195%);
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  box-shadow:
-    0 14px 36px -8px rgba(15, 23, 42, 0.11),
-    0 2px 6px rgba(15, 23, 42, 0.04),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.98);
-}
-
 html.light .glass-subtle {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.75) 0%, rgba(245, 247, 250, 0.6) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow:
     0 4px 14px -3px rgba(15, 23, 42, 0.06),
     inset 0 1px 0 0 rgba(255, 255, 255, 0.96);
 }
 
+html.light .liquid-glass-heavy,
 html.light .glass-dropdown {
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(42px) saturate(195%);
-  -webkit-backdrop-filter: blur(42px) saturate(195%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(245, 247, 250, 0.86) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  backdrop-filter: blur(24px) saturate(190%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
   border: 1px solid rgba(15, 23, 42, 0.1);
   box-shadow:
-    0 24px 60px -12px rgba(15, 23, 42, 0.18),
-    0 4px 12px rgba(15, 23, 42, 0.05),
+    0 16px 48px -8px rgba(15, 23, 42, 0.18),
     inset 0 1px 0 0 rgba(255, 255, 255, 1);
 }
 
 /* Mantém superfícies escuras cinematográficas dentro do VideoPlayer mesmo quando o app está em Modo Claro */
+html.light .dark .liquid-glass,
 html.light .dark .glass-panel {
-  background: rgba(18, 22, 31, 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.55) 0%, rgba(18, 18, 22, 0.35) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+    0 8px 32px 0 rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 }
 
 html.light .dark .glass-subtle {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.45) 0%, rgba(18, 18, 22, 0.28) 100%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
 }
 
+html.light .dark .liquid-glass-heavy,
 html.light .dark .glass-dropdown {
-  background: rgba(13, 16, 24, 0.92);
+  background: linear-gradient(135deg, rgba(28, 28, 32, 0.78) 0%, rgba(18, 18, 22, 0.62) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  backdrop-filter: blur(24px) saturate(190%);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
+  isolation: isolate;
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 30px 70px rgba(0, 0, 0, 0.68),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+    0 8px 32px 0 rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18);
 }
 
 /* Safe-area padding para navegadores mobile iOS/Android */
@@ -160,8 +186,10 @@ html.light .dark .glass-dropdown {
 
 html.light .apple-card {
   background: rgba(255, 255, 255, 0.88) !important;
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  transform: translate3d(0, 0, 0);
+  will-change: backdrop-filter;
   border: 1px solid rgba(15, 23, 42, 0.08) !important;
   box-shadow:
     0 10px 26px -6px rgba(15, 23, 42, 0.08),

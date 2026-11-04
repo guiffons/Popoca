@@ -298,6 +298,11 @@ export default function App() {
       return;
     }
 
+    // Libera imediatamente o motor anterior e descritores de arquivo no Render ao trocar de mídia ou episódio
+    if (activePlayerState?.torrent?.magnetUri) {
+      api.destroyTorrent(activePlayerState.torrent.magnetUri).catch(() => {});
+    }
+
     try {
       const year = media.release_date ? media.release_date.slice(0, 4) : undefined;
       const trackerPriority = api.getSavedTrackerPriority();
@@ -305,6 +310,7 @@ export default function App() {
         originalTitle: media.original_title,
         year,
         imdbId: media.imdb_id,
+        tmdbId: media.id,
         mediaType: media.media_type,
         season: episode?.seasonNumber,
         episode: episode?.episodeNumber,
@@ -369,6 +375,11 @@ export default function App() {
     explicitResumeTime?: number,
     openCastImmediately?: boolean
   ) => {
+    // Destrói o motor torrent anterior no backend caso estivesse tocando outra fonte
+    if (activePlayerState?.torrent?.magnetUri && activePlayerState.torrent.magnetUri !== torrent.magnetUri) {
+      api.destroyTorrent(activePlayerState.torrent.magnetUri).catch(() => {});
+    }
+
     const historyMatch = watchHistory.find((h) => h.id === media.id);
     const isSameHistoryEpisode =
       !episode ||
@@ -399,6 +410,10 @@ export default function App() {
 
   const handleNextEpisode = async () => {
     if (!activePlayerState?.episode) return;
+    const prevMagnet = activePlayerState.torrent?.magnetUri;
+    if (prevMagnet) {
+      api.destroyTorrent(prevMagnet).catch(() => {});
+    }
     let media = activePlayerState.media;
     const currentEp = activePlayerState.episode;
 
@@ -438,6 +453,9 @@ export default function App() {
   };
 
   const handleClosePlayer = () => {
+    if (activePlayerState?.torrent?.magnetUri) {
+      api.destroyTorrent(activePlayerState.torrent.magnetUri).catch(() => {});
+    }
     setActivePlayerState(null);
     setIsPlayerMini(false);
     refreshWatchHistory();

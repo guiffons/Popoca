@@ -26,72 +26,69 @@ export interface TorrentItem {
   fileIdx?: number;
 }
 
+export const SUPER_TRACKERS: string[] = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://exodus.desync.com:6969/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://p4p.arenabg.com:1337/announce',
+  'udp://tracker.dler.org:6969/announce',
+  'udp://opentracker.i2p.rocks:6969/announce',
+  'udp://tracker.internetwarriors.net:1337/announce',
+  'udp://tracker.leechers-paradise.org:6969/announce',
+  'udp://coppersurfer.tk:6969/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'http://tracker.openbittorrent.com:80/announce'
+];
+
 export const TRACKER_PROFILES: Record<TrackerPriorityMode, string[]> = {
   'pt-br-stability': [
-    'udp://tracker.opentrackr.org:1337/announce',
+    ...SUPER_TRACKERS,
     'http://tracker.opentrackr.org:1337/announce',
     'udp://open.tracker.cl:1337/announce',
-    'udp://open.demonii.com:1337/announce',
-    'udp://open.stealth.si:80/announce',
-    'udp://exodus.desync.com:6969/announce',
-    'udp://tracker.torrent.eu.org:451/announce',
     'http://tracker.torrent.eu.org:451/announce',
-    'udp://tracker.dler.org:6969/announce',
     'http://tracker.dler.org:6969/announce',
     'udp://tracker.moeking.me:6969/announce',
     'https://tracker.tamersunion.org:443/announce',
     'udp://tracker.bittor.pw:1337/announce',
-    'udp://explodie.org:6969/announce',
     'udp://tracker1.bt.moack.co.kr:2710/announce',
     'udp://tracker.therarbg.com:6969/announce',
     'http://tracker.bt4g.com:2095/announce',
-    'http://tracker.openbittorrent.com:80/announce',
-    'udp://tracker.openbittorrent.com:6969/announce',
     'wss://tracker.openwebtorrent.com',
     'wss://tracker.webtorrent.dev',
     'wss://tracker.files.fm:7073/announce'
   ],
   'ultra-speed': [
-    'udp://tracker.opentrackr.org:1337/announce',
+    ...SUPER_TRACKERS,
     'http://tracker.opentrackr.org:1337/announce',
     'udp://open.tracker.cl:1337/announce',
-    'udp://open.demonii.com:1337/announce',
-    'udp://open.stealth.si:80/announce',
-    'udp://exodus.desync.com:6969/announce',
-    'udp://tracker.torrent.eu.org:451/announce',
-    'udp://p4p.arenabg.com:1337/announce',
     'http://p4p.arenabg.com:1337/announce',
     'http://tracker.bt4g.com:2095/announce',
     'https://tracker.tamersunion.org:443/announce',
-    'udp://tracker.dler.org:6969/announce',
     'udp://tracker.moeking.me:6969/announce',
     'udp://tracker.nyaa.vc:6969/announce',
     'wss://tracker.openwebtorrent.com',
     'wss://tracker.btorrent.xyz'
   ],
   'global-balanced': [
-    'udp://tracker.opentrackr.org:1337/announce',
+    ...SUPER_TRACKERS,
     'http://tracker.opentrackr.org:1337/announce',
     'udp://open.tracker.cl:1337/announce',
-    'udp://open.demonii.com:1337/announce',
-    'udp://open.stealth.si:80/announce',
     'udp://tracker.nyaa.vc:6969/announce',
-    'udp://exodus.desync.com:6969/announce',
-    'udp://tracker.torrent.eu.org:451/announce',
     'http://tracker.torrent.eu.org:451/announce',
     'https://tracker.tamersunion.org:443/announce',
-    'udp://tracker.dler.org:6969/announce',
     'udp://tracker.moeking.me:6969/announce',
-    'udp://explodie.org:6969/announce',
-    'http://tracker.openbittorrent.com:80/announce',
-    'udp://tracker.openbittorrent.com:6969/announce',
     'http://p4p.arenabg.com:1337/announce',
     'wss://tracker.openwebtorrent.com'
   ]
 };
 
 export function getTrackersForPriority(mode: TrackerPriorityMode = 'pt-br-stability'): string[] {
-  return TRACKER_PROFILES[mode] || TRACKER_PROFILES['pt-br-stability'];
+  const profile = TRACKER_PROFILES[mode] || TRACKER_PROFILES['pt-br-stability'];
+  return Array.from(new Set([...SUPER_TRACKERS, ...profile]));
 }
 
 export function buildMagnet(
@@ -148,7 +145,7 @@ function isRussianRelease(text: string): boolean {
   if (!text) return false;
   if (/[\u0400-\u04FF]/.test(text)) return true;
   if (/\b(rus|rutor|rutracker|kraken|mvo|avo|dub\s*rus|dublado\s*rus)\b/i.test(text)) return true;
-  if (text.includes('🇷🇺')) return true;
+  if (text.includes('\u{1F1F7}\u{1F1FA}')) return true;
   if (/\[rus\]|\(rus\)/i.test(text)) return true;
   return false;
 }
@@ -157,8 +154,8 @@ function isPortugueseRelease(text: string, cleanSource?: string): boolean {
   if (!text) return false;
   const t = text.toLowerCase();
 
-  // YTS, EZTV e Nyaa são estritamente áudio original (Inglês ou Japonês).
-  // Torrentio exibe bandeiras 🇵🇹/🇧🇷 para eles exclusivamente por causa de legendas embutidas!
+  // YTS, EZTV e Nyaa sao estritamente audio original (Ingles ou Japones).
+  // Torrentio exibe bandeiras PT/BR para eles exclusivamente por causa de legendas embutidas!
   if (
     cleanSource === 'YTS HD' ||
     cleanSource === 'EZTV Séries' ||
@@ -168,12 +165,12 @@ function isPortugueseRelease(text: string, cleanSource?: string): boolean {
     return false;
   }
 
-  // Se o release for expressamente apenas legendado (ex: "legendas", "subpack") e não contiver dublado/dual
+  // Se o release for expressamente apenas legendado (ex: "legendas", "subpack") e nao contiver dublado/dual
   if (/\b(legendado|legendas|subpack|multisubs?)\b/i.test(t) && !/\b(dublado|dub\b|dual\b)\b/i.test(t)) {
     return false;
   }
 
-  // Trackers especializados brasileiros publicam releases dublados/dual com áudio PT-BR garantido
+  // Trackers especializados brasileiros publicam releases dublados/dual com audio PT-BR garantido
   const isBrazilianTracker =
     cleanSource === 'Brazuka / Comando' ||
     cleanSource === 'BluDV Filmes' ||
@@ -182,7 +179,7 @@ function isPortugueseRelease(text: string, cleanSource?: string): boolean {
     t.includes('micoleaodublado') ||
     t.includes('brazuka');
 
-  // Termos explícitos de ÁUDIO em português no release
+  // Termos explicitos de AUDIO em portugues no release
   const hasExplicitAudioPt =
     t.includes('dublado') ||
     t.includes('audio dublado') ||
@@ -195,7 +192,7 @@ function isPortugueseRelease(text: string, cleanSource?: string): boolean {
     t.includes('nacional') ||
     /\b(dub|dual)\b/i.test(t);
 
-  // Se tiver indicação de outro idioma no dual (ex: Dual Audio / 🇬🇧 / 🇮🇹 - Italiano e Inglês), rejeita
+  // Se tiver indicacao de outro idioma no dual (ex: Dual Audio Italiano e Ingles), rejeita
   const hasForeignDual =
     /\b(ita|italian|italiano|spa|spanish|espanol|latino|french|vf2|vff|german|deutsch|hindi|tamil|telugu|polish|pol)\b/i.test(
       t
@@ -211,7 +208,7 @@ function isPortugueseRelease(text: string, cleanSource?: string): boolean {
     return false;
   }
 
-  if (isBrazilianTracker && (hasExplicitAudioPt || t.includes('🇧🇷') || t.includes('🇵🇹'))) {
+  if (isBrazilianTracker && (hasExplicitAudioPt || t.includes('\u{1F1E7}\u{1F1F7}') || t.includes('\u{1F1F5}\u{1F1F9}'))) {
     return true;
   }
 
@@ -383,16 +380,28 @@ export class IndexerService {
     let targetImdb = imdbId;
     if (!targetImdb && (query || searchTitleForFallback)) {
       try {
-        const qEncoded = encodeURIComponent((query || searchTitleForFallback).trim().toLowerCase());
-        const imdbSugRes = await fetch(`https://v3.sg.media-imdb.com/suggestion/x/${qEncoded}.json`, {
+        const cleanQ = (searchTitleForFallback || query).trim().toLowerCase();
+        const firstChar = cleanQ.replace(/[^a-z0-9]/gi, '').charAt(0) || 'x';
+        const qEncoded = encodeURIComponent(cleanQ);
+        const imdbSugRes = await fetch(`https://v3.sg.media-imdb.com/suggestion/${firstChar}/${qEncoded}.json`, {
           headers: { 'Accept-Language': 'pt-BR,pt;q=0.9' },
           signal: AbortSignal.timeout(3000)
         });
         if (imdbSugRes.ok) {
           const sugData = await imdbSugRes.json();
-          const firstValid = (sugData.d || []).find(
-            (d: any) => typeof d.id === 'string' && d.id.startsWith('tt')
+          const list = Array.isArray(sugData.d) ? sugData.d : [];
+          const wantSeries = mediaType === 'tv' || mediaType === 'anime';
+          const preferredMatch = list.find(
+            (d: any) =>
+              typeof d.id === 'string' &&
+              d.id.startsWith('tt') &&
+              (wantSeries
+                ? d.qid === 'tvSeries' || d.qid === 'tvMiniSeries'
+                : d.qid === 'movie' || d.qid === 'feature')
           );
+          const firstValid =
+            preferredMatch ||
+            list.find((d: any) => typeof d.id === 'string' && d.id.startsWith('tt'));
           if (firstValid) {
             targetImdb = firstValid.id;
           }
@@ -467,10 +476,10 @@ export class IndexerService {
       }
       seenHashes.add(hash);
 
-      const seedMatch = fullText.match(/👤\s*(\d+)/);
+      const seedMatch = fullText.match(/\u{1F464}\s*(\d+)/u);
       const seeds = seedMatch ? parseInt(seedMatch[1], 10) : 0;
 
-      const sizeMatch = fullText.match(/💾\s*([\d\.]+\s*(?:GB|MB|GiB|MiB))/i);
+      const sizeMatch = fullText.match(/\u{1F4BE}\s*([\d\.]+\s*(?:GB|MB|GiB|MiB))/iu);
       const sizeFormatted = sizeMatch ? sizeMatch[1].trim() : '1.65 GB';
       const sizeBytes = parseSizeToBytes(sizeFormatted);
 
@@ -487,7 +496,7 @@ export class IndexerService {
 
       const lines = (st.title || '').split('\n');
       const filename = lines[0] || `${query || searchTitleForFallback} (${releaseYear}) [${quality} ${format}]`;
-      const sourceMatch = fullText.match(/⚙️\s*([^\n\r]+)/);
+      const sourceMatch = fullText.match(/\u{2699}\uFE0F?\s*([^\n\r]+)/u);
       const rawSource = sourceMatch ? sourceMatch[1].trim() : 'Popoca P2P';
       const cleanSource = formatSourceLabel(rawSource, fullText);
 
@@ -529,8 +538,13 @@ export class IndexerService {
 
     const sortWithPtPriority = (a: TorrentItem, b: TorrentItem) => {
       if (trackerPriority === 'pt-br-stability') {
-        const aPtHealthy = a.isPortugueseAudio && a.seeds >= 2 ? 1 : 0;
-        const bPtHealthy = b.isPortugueseAudio && b.seeds >= 2 ? 1 : 0;
+        const isPtViable = (item: TorrentItem) => {
+          if (!item.isPortugueseAudio) return 0;
+          const minViableSeeds = item.sizeBytes > 4.5 * 1024 * 1024 * 1024 ? 8 : 5;
+          return item.seeds >= minViableSeeds ? 1 : 0;
+        };
+        const aPtHealthy = isPtViable(a);
+        const bPtHealthy = isPtViable(b);
         if (aPtHealthy !== bPtHealthy) return bPtHealthy - aPtHealthy;
       }
       return b.stabilityScore - a.stabilityScore || b.seeds - a.seeds;
@@ -566,6 +580,113 @@ export class IndexerService {
 
     return selected.sort(sortWithPtPriority);
   }
+}
+
+export function normalizeQuality(raw?: string): '4K' | '1080p' | '720p' {
+  if (!raw) return '1080p';
+  const low = raw.trim().toLowerCase();
+  if (low === '4k' || low === '2160p' || low === 'uhd') return '4K';
+  if (low === '720p' || low === 'hd') return '720p';
+  return '1080p';
+}
+
+const QUALITY_RANK: Record<'4K' | '1080p' | '720p', number> = {
+  '4K': 3,
+  '1080p': 2,
+  '720p': 1
+};
+
+/**
+ * FASE 2: Respeito Estrito a Qualidade Escolhida (Quality Cap) + Fallback Inteligente
+ * - Inicia exatamente na resolucao escolhida pelo usuario (ordenando pelo torrent com mais seeders dentro daquela qualidade).
+ * - NUNCA sobe para uma qualidade maior que a solicitada.
+ * - Prepara candidatos da qualidade imediatamente inferior (ex: 1080p -> 720p) para o Health Check de 5 segundos.
+ */
+export function selectQualityCappedCandidates(
+  torrents: TorrentItem[],
+  preferredQuality?: string,
+  preferPortugueseAudio: boolean = true
+): {
+  requestedQuality: '4K' | '1080p' | '720p';
+  primaryCandidates: TorrentItem[];
+  fallbackCandidates: TorrentItem[];
+  fallbackQuality: '1080p' | '720p' | null;
+  hybridCandidate?: { videoTorrent: TorrentItem; audioTorrent: TorrentItem } | null;
+} {
+  const requestedQuality = normalizeQuality(preferredQuality);
+  const maxRank = QUALITY_RANK[requestedQuality];
+
+  const valid = torrents.filter((t) => Boolean(t.magnetUri));
+  // Quality Cap estrito: nunca permite qualidade superior a escolhida pelo usuario
+  const capped = valid.filter((t) => QUALITY_RANK[t.quality] <= maxRank);
+  const pool = capped.length > 0 ? capped : valid;
+
+  const sortByLangAndSeedsDesc = (a: TorrentItem, b: TorrentItem) => {
+    const aLangMatch = preferPortugueseAudio ? (a.isPortugueseAudio ? 1 : 0) : (!a.isPortugueseAudio ? 1 : 0);
+    const bLangMatch = preferPortugueseAudio ? (b.isPortugueseAudio ? 1 : 0) : (!b.isPortugueseAudio ? 1 : 0);
+    if (aLangMatch !== bLangMatch) return bLangMatch - aLangMatch;
+    return b.seeds - a.seeds || b.stabilityScore - a.stabilityScore;
+  };
+
+  const sortBySeedsDesc = (a: TorrentItem, b: TorrentItem) =>
+    b.seeds - a.seeds || b.stabilityScore - a.stabilityScore;
+
+  const exactQuality = pool
+    .filter((t) => t.quality === requestedQuality)
+    .sort(sortByLangAndSeedsDesc);
+
+  const lowerOrder: Array<'1080p' | '720p'> =
+    requestedQuality === '4K' ? ['1080p', '720p'] : requestedQuality === '1080p' ? ['720p'] : [];
+
+  let fallbackQuality: '1080p' | '720p' | null = null;
+  let fallbackCandidates: TorrentItem[] = [];
+
+  for (const lq of lowerOrder) {
+    const matches = pool.filter((t) => t.quality === lq).sort(sortByLangAndSeedsDesc);
+    if (matches.length > 0) {
+      fallbackQuality = lq;
+      fallbackCandidates = matches;
+      break;
+    }
+  }
+
+  // Se nao houver nenhum candidato na resolucao exata pedida, inicia direto na resolucao inferior disponivel
+  const primaryCandidates = exactQuality.length > 0 ? exactQuality : fallbackCandidates;
+
+  // FASE 3: Detecta oportunidade de Muxing Hibrido (Video 4K/1080p EN + Audio 720p PT-BR)
+  // quando o usuario quer PT-BR em 1080p/4K mas so existe PT-BR em 720p
+  let hybridCandidate: { videoTorrent: TorrentItem; audioTorrent: TorrentItem } | null = null;
+  if (preferPortugueseAudio && requestedQuality !== '720p') {
+    const ptExact = capped.filter((t) => t.isPortugueseAudio && t.quality === requestedQuality);
+    const pt720 = capped
+      .filter((t) => t.isPortugueseAudio && t.quality === '720p' && t.seeds >= 1)
+      .sort(sortBySeedsDesc);
+    const enHigh = capped
+      .filter((t) => !t.isPortugueseAudio && t.quality === requestedQuality && t.seeds >= 2)
+      .sort((a, b) => {
+        const aWebDl = a.format === 'WEB-DL' ? 1 : 0;
+        const bWebDl = b.format === 'WEB-DL' ? 1 : 0;
+        if (aWebDl !== bWebDl) return bWebDl - aWebDl;
+        return b.seeds - a.seeds;
+      });
+
+    if (ptExact.length === 0 && pt720.length > 0 && enHigh.length > 0) {
+      const preferredAudio =
+        pt720.find((a) => a.format === enHigh[0].format) || pt720[0];
+      hybridCandidate = {
+        videoTorrent: enHigh[0],
+        audioTorrent: preferredAudio
+      };
+    }
+  }
+
+  return {
+    requestedQuality,
+    primaryCandidates,
+    fallbackCandidates: exactQuality.length > 0 ? fallbackCandidates : [],
+    fallbackQuality: exactQuality.length > 0 ? fallbackQuality : null,
+    hybridCandidate
+  };
 }
 
 export const indexerService = new IndexerService();

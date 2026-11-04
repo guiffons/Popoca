@@ -225,8 +225,8 @@ export const TorrentDropZone: React.FC<TorrentDropZoneProps> = ({
 
       {/* Alerta de Magnet Detectado no Clipboard */}
       {detectedMagnet && (
-        <div className="fixed inset-0 z-[95] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-          <div className="max-w-md w-full glass-panel p-6 rounded-3xl border border-white/20 text-white shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-[95] bg-black/70 flex items-center justify-center p-4">
+          <div className="max-w-md w-full liquid-glass-heavy p-6 rounded-3xl text-white shadow-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
@@ -272,11 +272,11 @@ export const TorrentDropZone: React.FC<TorrentDropZoneProps> = ({
       {isModalOpen && (
         <div
           onClick={onCloseModal}
-          className="fixed inset-0 z-[85] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-[85] bg-black/70 flex items-center justify-center p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="max-w-lg w-full bg-[#10141D] border border-white/20 rounded-3xl p-6 text-white shadow-2xl space-y-4 animate-in zoom-in-95 duration-200"
+            className="max-w-lg w-full liquid-glass-heavy rounded-3xl p-6 text-white shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div className="flex items-center gap-2.5">

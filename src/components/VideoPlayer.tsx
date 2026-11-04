@@ -230,7 +230,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const streamStartOffsetRef = useRef<number>(initialStartOffset);
   const lastKnownTimeRef = useRef<number>(initialStartOffset);
   const pendingResumeTimeRef = useRef<number>(0);
-  const isTranscodedRef = useRef<boolean>(forceTranscode || initialStartOffset > 0);
+  const isLikelyMkvTorrent = /\.(mkv|avi|ts|m2ts)\b/i.test(torrent.title || '');
+  const isTranscodedRef = useRef<boolean>(forceTranscode || initialStartOffset > 0 || isLikelyMkvTorrent);
   const userPausedRef = useRef<boolean>(false);
 
   // Qualidade travada na escolha do usuário entre as 3 opções (720p, 1080p padrão, 4K)
@@ -252,6 +253,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [liveStats, setLiveStats] = useState<TorrentLiveStats | null>(null);
   const [isRetryingNetwork, setIsRetryingNetwork] = useState<boolean>(false);
   const [showTechStats, setShowTechStats] = useState<boolean>(false);
+
+  // FASE 3: Muxing Hibrido (Video 4K/1080p EN + Audio 720p PT-BR) e Sincronia de Audio (-2.0s a +2.0s)
+  const [isHybridMode, setIsHybridMode] = useState<boolean>(false);
+  const [audioSyncOffsetSec, setAudioSyncOffsetSec] = useState<number>(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const delayNodeRef = useRef<DelayNode | null>(null);
+  const sourceNodeCreatedRef = useRef<boolean>(false);
+
+  // Scrubber hover/touch preview time
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverPercent, setHoverPercent] = useState<number>(0);
+  const scrubberRef = useRef<HTMLDivElement>(null);
 
   // Duração autoritativa de referência
   const authoritativeDuration = useMemo(() => {
@@ -444,6 +457,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [isMini, miniWidth]);
 
+  // Destrói imediatamente o motor torrent no backend ao desmontar o player ou trocar de torrent
+  useEffect(() => {
+    const activeMag = currentTorrent.magnetUri;
+    return () => {
+      if (activeMag) {
+        api.destroyTorrent(activeMag).catch(() => {});
+      }
+    };
+  }, [currentTorrent.magnetUri]);
+
+  // Se o player receber um tempo inicial de retomada (ex: parar no meio do filme), dispara pré-carregamento imediato
+  useEffect(() => {
+    if (initialStartOffset > 0 && currentTorrent.magnetUri) {
+      api.prefetchNextChunks(currentTorrent.magnetUri, initialStartOffset, authoritativeDuration).catch(() => {});
+    }
+  }, [initialStartOffset, currentTorrent.magnetUri, authoritativeDuration]);
+
   const closeAllMenus = useCallback(() => {
     setShowSpeedMenu(false);
     setShowSubMenu(false);
@@ -454,9 +484,75 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setShowMobileSettingsSheet(false);
   }, []);
 
+  // FASE 3: Par Hibrido disponivel (Video 1080p/4K EN + Audio 720p PT-BR)
+  const hybridPair = useMemo(() => {
+    const pool = torrentsPool || [];
+    const pt720 = pool
+      .filter((t) => t.isPortugueseAudio && t.quality === '720p' && t.magnetUri?.startsWith('magnet:?'))
+      .sort((a, b) => b.seeds - a.seeds);
+    const enHigh = pool
+      .filter(
+        (t) =>
+          !t.isPortugueseAudio &&
+          (t.quality === preferredQuality || t.quality === '1080p' || t.quality === '4K') &&
+          t.quality !== '720p' &&
+          t.magnetUri?.startsWith('magnet:?')
+      )
+      .sort((a, b) => b.seeds - a.seeds);
+
+    if (pt720.length > 0 && enHigh.length > 0) {
+      const sameFormatAudio = pt720.find((a) => a.format === enHigh[0].format) || pt720[0];
+      return {
+        videoTorrent: enHigh[0],
+        audioTorrent: sameFormatAudio
+      };
+    }
+    return null;
+  }, [torrentsPool, preferredQuality]);
+
+  // FASE 3: Web Audio API DelayNode para ajuste fino de Sincronia de Audio (-2.0s a +2.0s)
+  const applyAudioSyncOffset = useCallback(
+    (newOffsetSec: number) => {
+      const clamped = Math.max(-2.0, Math.min(2.0, Math.round(newOffsetSec * 10) / 10));
+      setAudioSyncOffsetSec(clamped);
+
+      const v = videoRef.current;
+      if (!v) return;
+
+      try {
+        if (!sourceNodeCreatedRef.current && clamped !== 0) {
+          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+          if (AudioCtx) {
+            const ctx = new AudioCtx();
+            const source = ctx.createMediaElementSource(v);
+            const delay = ctx.createDelay(5.0);
+            delay.delayTime.value = Math.max(0, clamped);
+            source.connect(delay);
+            delay.connect(ctx.destination);
+            audioCtxRef.current = ctx;
+            delayNodeRef.current = delay;
+            sourceNodeCreatedRef.current = true;
+          }
+        } else if (delayNodeRef.current && audioCtxRef.current) {
+          if (audioCtxRef.current.state === 'suspended') {
+            audioCtxRef.current.resume().catch(() => {});
+          }
+          delayNodeRef.current.delayTime.setTargetAtTime(
+            Math.max(0, clamped),
+            audioCtxRef.current.currentTime,
+            0.05
+          );
+        }
+      } catch {
+        // Fallback silencioso caso o navegador bloqueie MediaElementSource
+      }
+    },
+    []
+  );
+
   /**
-   * Constrói URL de streaming garantindo que altMagnets sejam ESTRITAMENTE
-   * da MESMA qualidade E do MESMO idioma (nunca mistura Inglês com Português!)
+   * Constroi URL de streaming respeitando estritamente o Quality Cap (Fase 2) e Fallback 720p (5s Health Check),
+   * ou Muxing Hibrido (Fase 3) quando ativado.
    */
   const getStreamUrlForTorrent = useCallback(
     (
@@ -466,8 +562,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         isRetry?: boolean;
         seekSeconds?: number;
         audioTrackIndex?: number;
+        useHybrid?: boolean;
       } = {}
     ): string => {
+      const useHybrid = opts.useHybrid ?? isHybridMode;
+      if (useHybrid && hybridPair) {
+        return (
+          api.getHybridStreamUrl(hybridPair.videoTorrent.magnetUri, hybridPair.audioTorrent.magnetUri, {
+            seekSeconds: opts.seekSeconds,
+            audioDelayMs: audioSyncOffsetSec * 1000,
+            trackerPriority: priorityMode,
+            season: episode?.seasonNumber,
+            episode: episode?.episodeNumber
+          }) + (opts.isRetry ? `&_retry=${Date.now()}` : '')
+        );
+      }
+
       const targetStreamKey = videoChunkCache.buildStreamKey(
         targetTorrent.magnetUri || targetTorrent.directUrl || '',
         media.id,
@@ -475,8 +585,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         episode?.episodeNumber
       );
 
-            const pool = torrentsPool || [];
-      const sameQualityAlts = pool
+      const pool = torrentsPool || [];
+      const sameLangSameQual = pool
         .filter(
           (t) =>
             t.id !== targetTorrent.id &&
@@ -484,29 +594,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             t.isPortugueseAudio === targetTorrent.isPortugueseAudio &&
             t.magnetUri?.startsWith('magnet:?')
         )
-        .sort((a, b) => (b.stabilityScore || b.seeds) - (a.stabilityScore || a.seeds))
-        .map((t) => t.magnetUri);
+        .sort((a, b) => b.seeds - a.seeds);
 
-      const otherQualitySameLangAlts = pool
+      const crossLangHealthySameQual = pool
         .filter(
           (t) =>
             t.id !== targetTorrent.id &&
-            t.quality !== targetTorrent.quality &&
-            t.isPortugueseAudio === targetTorrent.isPortugueseAudio &&
-            t.magnetUri?.startsWith('magnet:?') &&
-            t.seeds >= 2
+            t.quality === targetTorrent.quality &&
+            t.isPortugueseAudio !== targetTorrent.isPortugueseAudio &&
+            t.seeds >= 5 &&
+            t.magnetUri?.startsWith('magnet:?')
         )
-        .sort((a, b) => (b.stabilityScore || b.seeds) - (a.stabilityScore || a.seeds))
-        .map((t) => t.magnetUri);
+        .sort((a, b) => b.seeds - a.seeds);
 
-      const sameQualityAndLangAlts = [...sameQualityAlts, ...otherQualitySameLangAlts].slice(0, 4);
+      // Se a fonte PT-BR tiver poucas sementes (<= 4), coloca no máximo 1 alternativa PT-BR seguida das fontes mais saudáveis
+      const sameQualityAlts = (
+        targetTorrent.seeds <= 4 && crossLangHealthySameQual.length > 0
+          ? [...sameLangSameQual.slice(0, 1), ...crossLangHealthySameQual]
+          : [...sameLangSameQual, ...crossLangHealthySameQual]
+      ).map((t) => t.magnetUri);
+
+      // Candidato de Fallback imediatamente inferior (ex: 1080p -> 720p) para o Health Check de 5s
+      const lowerQualityTarget: FixedVideoQuality | null =
+        targetTorrent.quality === '4K' ? '1080p' : targetTorrent.quality === '1080p' ? '720p' : null;
+
+      const lowerQualitySameLang = lowerQualityTarget
+        ? pool
+            .filter(
+              (t) =>
+                t.quality === lowerQualityTarget &&
+                t.isPortugueseAudio === targetTorrent.isPortugueseAudio &&
+                t.magnetUri?.startsWith('magnet:?')
+            )
+            .sort((a, b) => b.seeds - a.seeds)
+        : [];
+
+      const lowerQualityAnyLang = lowerQualityTarget
+        ? pool
+            .filter(
+              (t) =>
+                t.quality === lowerQualityTarget &&
+                t.isPortugueseAudio !== targetTorrent.isPortugueseAudio &&
+                t.seeds >= 3 &&
+                t.magnetUri?.startsWith('magnet:?')
+            )
+            .sort((a, b) => b.seeds - a.seeds)
+        : [];
+
+      const bestLowerFallback =
+        lowerQualitySameLang[0] ||
+        lowerQualityAnyLang[0] ||
+        crossLangHealthySameQual[0];
 
       if (targetTorrent.magnetUri && targetTorrent.magnetUri.startsWith('magnet:?')) {
         return (
           api.getStreamUrl(targetTorrent.magnetUri, {
+            quality: targetTorrent.quality,
             transcode: forceTranscode,
             audioOnly: false,
-            altMagnets: sameQualityAndLangAlts.slice(0, 4),
+            altMagnets: sameQualityAlts.slice(0, 3),
+            fallbackMagnet: bestLowerFallback?.magnetUri,
+            fallbackQuality: bestLowerFallback?.quality,
             trackerPriority: priorityMode,
             streamKey: targetStreamKey,
             seekSeconds: opts.seekSeconds,
@@ -542,7 +690,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (media.stream_url) return api.getVideoStreamProxyUrl(media.stream_url);
       return '/api/stream';
     },
-    [torrentsPool, forceTranscode, media, episode]
+    [torrentsPool, forceTranscode, media, episode, isHybridMode, hybridPair, audioSyncOffsetSec]
   );
 
   const [activeVideoSrc, setActiveVideoSrc] = useState<string>(() =>
@@ -573,8 +721,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCurrentTime(safeTime);
 
       const v = videoRef.current;
+      const isKnownMkvFile = /\.(mkv|avi|ts|m2ts)\b/i.test(
+        `${targetTor.title || ''} ${liveStats?.name || ''}`
+      );
+      if (isKnownMkvFile) {
+        isTranscodedRef.current = true;
+      }
       const isProvenNativeSeekable = Boolean(
-        v && Number.isFinite(v.duration) && v.duration > 30 && !isTranscodedRef.current
+        v && Number.isFinite(v.duration) && v.duration > 30 && !isTranscodedRef.current && !isKnownMkvFile
       );
       const torChanged = Boolean(overrideTorrent && overrideTorrent.id !== currentTorrent.id);
       const shouldPassServerSeek =
@@ -766,6 +920,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const pollStats = async () => {
       const stats = await api.getTorrentStats(currentTorrent.magnetUri);
       if (active && stats) {
+        if (/\.(mkv|avi|ts|m2ts)\b/i.test(stats.name || '')) {
+          isTranscodedRef.current = true;
+        }
         setLiveStats(stats);
       }
     };
@@ -868,44 +1025,74 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     ]
   );
 
-  // Troca entre as 3 Qualidades Fixas (720p, 1080p, 4K) preservando idioma e o segundo exato do filme!
+  // Troca entre as 3 Qualidades Fixas (720p, 1080p, 4K) respeitando Quality Cap e detectando Mux Hibrido!
   const handleSelectFixedQuality = (newQuality: FixedVideoQuality) => {
     setShowQualityMenu(false);
     setPreferredQuality(newQuality);
     api.setPreferredQuality(newQuality);
 
-    if (currentTorrent.quality === newQuality) {
+    if (currentTorrent.quality === newQuality && !isHybridMode) {
       showToastNotification(`Qualidade atual já é ${newQuality}`, 2200);
       return;
     }
 
     // 1. Tenta encontrar fonte da mesma qualidade e mesmo idioma
-    let candidates = torrentsPool.filter(
-      (t) => t.quality === newQuality && t.isPortugueseAudio === currentTorrent.isPortugueseAudio
-    );
+    const sameLangCandidates = torrentsPool
+      .filter((t) => t.quality === newQuality && t.isPortugueseAudio === currentTorrent.isPortugueseAudio)
+      .sort((a, b) => b.seeds - a.seeds);
 
-    // 2. Se não houver no mesmo idioma, busca qualquer fonte dessa qualidade
-    if (candidates.length === 0) {
-      candidates = torrentsPool.filter((t) => t.quality === newQuality);
-    }
-
-    if (candidates.length === 0) {
+    if (sameLangCandidates.length > 0) {
+      const bestTarget = sameLangCandidates[0];
+      setIsHybridMode(false);
+      setCurrentTorrent(bestTarget);
+      setRetryAttempts(0);
+      reconnectStreamAtTime(lastKnownTimeRef.current, !userPausedRef.current, bestTarget, audioTrackOverride);
       showToastNotification(
-        `Nenhuma fonte ${newQuality} encontrada para este título.`,
-        3000
+        `Qualidade definida para ${newQuality} (${bestTarget.isPortugueseAudio ? 'PT-BR' : 'Original'})`,
+        2800
       );
       return;
     }
 
-    const sorted = [...candidates].sort((a, b) => (b.stabilityScore ?? b.seeds) - (a.stabilityScore ?? a.seeds));
-    const bestTarget = sorted[0];
-    setCurrentTorrent(bestTarget);
-    setRetryAttempts(0);
-    reconnectStreamAtTime(lastKnownTimeRef.current, !userPausedRef.current, bestTarget, audioTrackOverride);
-    showToastNotification(
-      `Qualidade alterada para ${newQuality} (${bestTarget.isPortugueseAudio ? 'PT-BR' : 'Original'}) mantendo o ponto atual!`,
-      2800
-    );
+    // 2. FASE 3: Se pediu 1080p/4K com audio PT-BR mas PT-BR so existe em 720p e existe 1080p/4K EN, ativa Muxing Hibrido!
+    if (currentTorrent.isPortugueseAudio && newQuality !== '720p' && hybridPair) {
+      setIsHybridMode(true);
+      isTranscodedRef.current = true;
+      const hybridUrl = getStreamUrlForTorrent(hybridPair.videoTorrent, trackerPriority, {
+        isRetry: true,
+        seekSeconds: lastKnownTimeRef.current > 1.5 ? lastKnownTimeRef.current : undefined,
+        useHybrid: true
+      });
+      setActiveVideoSrc(hybridUrl);
+      setIsBuffering(true);
+      showToastNotification(
+        `Muxing Híbrido ativado: Vídeo ${hybridPair.videoTorrent.quality} EN + Áudio 720p PT-BR em tempo real`,
+        3800
+      );
+      return;
+    }
+
+    // 3. Fallback estrito apenas para qualidade inferior disponivel (NUNCA sobe acima da escolhida)
+    const lowerQualities: FixedVideoQuality[] =
+      newQuality === '4K' ? ['1080p', '720p'] : newQuality === '1080p' ? ['720p'] : [];
+
+    for (const lq of lowerQualities) {
+      const lowerMatches = torrentsPool
+        .filter((t) => t.quality === lq && t.isPortugueseAudio === currentTorrent.isPortugueseAudio)
+        .sort((a, b) => b.seeds - a.seeds);
+      if (lowerMatches.length > 0) {
+        const bestLower = lowerMatches[0];
+        setIsHybridMode(false);
+        setCurrentTorrent(bestLower);
+        setPreferredQuality(bestLower.quality);
+        setRetryAttempts(0);
+        reconnectStreamAtTime(lastKnownTimeRef.current, !userPausedRef.current, bestLower, audioTrackOverride);
+        showToastNotification(`Conexão ajustada para ${bestLower.quality} para reprodução imediata`, 3500);
+        return;
+      }
+    }
+
+    showToastNotification(`Nenhuma fonte ${newQuality} disponível para este título.`, 3000);
   };
 
   // Troca de Idioma (Dublado PT-BR vs Original) ou Faixa de Áudio interna (Dual Áudio) mantendo a posição exata!
@@ -977,6 +1164,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           originalTitle: media.original_title,
           year,
           imdbId: media.imdb_id,
+          tmdbId: media.id,
           mediaType: media.media_type,
           season: episode?.seasonNumber,
           episode: episode?.episodeNumber,
@@ -1093,24 +1281,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     streamKey
   ]);
 
-  // Detector de congelamento inicial: se ficar mais de 12s em 0:00 com 0 KB/s, troca automaticamente de fonte
+  // FASE 2: Health Check de qualidade escolhida no cold start (sem interromper streams que já encontraram peers)
   useEffect(() => {
     if (!isBuffering || playbackError || !currentTorrent.magnetUri) return;
 
-    const stallTimer = setTimeout(() => {
+    const healthCheckTimer = setTimeout(() => {
+      const hasZeroPeersAndSpeed =
+        !liveStats || (liveStats.downloadSpeed < 8 * 1024 && liveStats.numPeers === 0);
+
       if (
-        lastKnownTimeRef.current < 2 &&
+        lastKnownTimeRef.current < 1.5 &&
         isBuffering &&
-        (!liveStats || liveStats.downloadSpeed === 0) &&
+        hasZeroPeersAndSpeed &&
+        currentTorrent.quality !== '720p'
+      ) {
+        const targetLower: FixedVideoQuality = currentTorrent.quality === '4K' ? '1080p' : '720p';
+        const lowerCandidates = torrentsPool
+          .filter(
+            (t) =>
+              (t.quality === targetLower || t.quality === '720p') &&
+              t.isPortugueseAudio === currentTorrent.isPortugueseAudio &&
+              t.seeds >= 1
+          )
+          .sort((a, b) => b.seeds - a.seeds);
+
+        if (lowerCandidates.length > 0) {
+          const downgraded = lowerCandidates[0];
+          setIsHybridMode(false);
+          setCurrentTorrent(downgraded);
+          setPreferredQuality(downgraded.quality);
+          setRetryAttempts(0);
+          reconnectStreamAtTime(lastKnownTimeRef.current, true, downgraded, audioTrackOverride);
+          showToastNotification(
+            `Conexão ajustada para ${downgraded.quality} para reprodução imediata`,
+            4500
+          );
+          return;
+        }
+      }
+
+      if (
+        lastKnownTimeRef.current < 1.5 &&
+        isBuffering &&
+        hasZeroPeersAndSpeed &&
         torrentsPool.length > 1
       ) {
-        console.log('[VideoPlayer] Semente inicial congelada (>12s sem dados). Alternando para fonte saudável...');
         switchToNextStableSameQualitySeed(false);
       }
-    }, 12000);
+    }, 9500);
 
-    return () => clearTimeout(stallTimer);
-  }, [isBuffering, playbackError, currentTorrent.id, liveStats?.downloadSpeed, torrentsPool.length, switchToNextStableSameQualitySeed]);
+    return () => clearTimeout(healthCheckTimer);
+  }, [
+    isBuffering,
+    playbackError,
+    currentTorrent,
+    liveStats,
+    torrentsPool,
+    audioTrackOverride,
+    reconnectStreamAtTime,
+    showToastNotification,
+    switchToNextStableSameQualitySeed
+  ]);
 
   /**
    * Recuperação Silenciosa de Buffer (SEM trocar de seed sozinho no meio do filme!):
@@ -1285,6 +1516,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
   };
 
+  const isColdStartBuffering =
+    isBuffering &&
+    lastKnownTimeRef.current < 1 &&
+    (!videoRef.current || videoRef.current.readyState === 0);
+
   /**
    * Busca unificada (MP4 nativo via HTTP 206/IndexedDB OU MKV transcodificado via FFmpeg Instant Seek!)
    */
@@ -1296,6 +1532,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       lastKnownTimeRef.current = target;
       setCurrentTime(target);
+      setRetryAttempts(0);
+      setPlaybackError(null);
 
       if (seekDebounceTimerRef.current) {
         clearTimeout(seekDebounceTimerRef.current);
@@ -1337,16 +1575,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
 
-      // 3. Caso contrário em MKV: antecipa imediatamente a janela de peças P2P e reposiciona o FFmpeg via Cues!
-      setIsBuffering(true);
-      if (currentTorrent.magnetUri?.startsWith('magnet:?')) {
-        api.prefetchNextChunks(currentTorrent.magnetUri, target, curDur).catch(() => { });
-      }
+      // 3. Caso contrário em MKV: antecipa a janela de peças P2P e reposiciona o FFmpeg após o debounce do arraste!
       if (debounceMs > 0) {
         seekDebounceTimerRef.current = setTimeout(() => {
+          if (currentTorrent.magnetUri?.startsWith('magnet:?')) {
+            api.prefetchNextChunks(currentTorrent.magnetUri, target, curDur).catch(() => { });
+          }
           reconnectStreamAtTime(target, !userPausedRef.current);
         }, debounceMs);
       } else {
+        setIsBuffering(true);
+        if (currentTorrent.magnetUri?.startsWith('magnet:?')) {
+          api.prefetchNextChunks(currentTorrent.magnetUri, target, curDur).catch(() => { });
+        }
         reconnectStreamAtTime(target, !userPausedRef.current);
       }
     },
@@ -1354,15 +1595,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   );
 
   const skipSeconds = (seconds: number) => {
+    if (isColdStartBuffering) {
+      triggerHud('Aguarde o carregamento inicial', 'pause');
+      return;
+    }
     seekToEffectiveTime(lastKnownTimeRef.current + seconds, 0);
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isColdStartBuffering) return;
     const time = parseFloat(e.target.value);
     const v = videoRef.current;
     const needsDebouncedServerSeek =
       isTranscodedRef.current || !(v && Number.isFinite(v.duration) && v.duration > 30);
-    seekToEffectiveTime(time, needsDebouncedServerSeek ? 180 : 0);
+    seekToEffectiveTime(time, needsDebouncedServerSeek ? 240 : 0);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1533,6 +1779,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         default:
           if (e.key >= '0' && e.key <= '9') {
             e.preventDefault();
+            if (isBuffering) {
+              triggerHud('Aguarde o carregamento', 'pause');
+              break;
+            }
             const pct = parseInt(e.key, 10) * 10;
             const target = ((duration > 0 ? duration : authoritativeDuration) * pct) / 100;
             seekToEffectiveTime(target, 0);
@@ -1640,13 +1890,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           : 'dark fixed inset-0 z-50 bg-black text-white flex items-center justify-center select-none overflow-hidden'
       }
     >
-      {/* Indicador Tátil HUD de Atalhos de Teclado e Gestos Touch */}
+      {/* Indicador Tatil HUD de Atalhos de Teclado e Gestos Touch */}
       {hudFeedback && !isMini && (
         <div
           key={hudFeedback.key}
-          className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center animate-in fade-in zoom-in-95 duration-150"
+          className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center"
         >
-          <div className="glass-dropdown px-5 py-3 rounded-2xl border border-white/20 shadow-2xl flex items-center gap-3 text-white backdrop-blur-2xl">
+          <div className="liquid-glass px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-white">
             {hudFeedback.icon === 'forward' && <RotateCw className="w-5 h-5 text-white" />}
             {hudFeedback.icon === 'replay' && <RotateCcw className="w-5 h-5 text-white" />}
             {hudFeedback.icon === 'volume' && <Volume2 className="w-5 h-5 text-white" />}
@@ -1660,9 +1910,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Toast de Rede / Qualidade / Idioma */}
+      {/* Aviso em Liquid Glass (Downgrade de Qualidade 5s / Rede / Idioma) */}
       {failoverToast && !isMini && (
-        <div className="absolute top-20 z-50 glass-dropdown px-4 py-2.5 rounded-2xl border border-white/20 shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-top duration-300 text-xs font-semibold text-white max-w-lg text-center">
+        <div className="absolute top-20 z-50 liquid-glass px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold text-white max-w-lg text-center">
           <Zap className="w-4 h-4 text-white shrink-0 animate-pulse" />
           <span>{failoverToast}</span>
         </div>
@@ -1689,6 +1939,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }}
         onCanPlay={() => {
           setIsBuffering(false);
+          setRetryAttempts(0);
+          setPlaybackError(null);
           refreshIdbBufferState();
         }}
         onLoadedData={() => {
@@ -1705,7 +1957,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             setIsBuffering(false);
           }
         }}
-        onPlaying={() => setIsBuffering(false)}
+        onPlaying={() => {
+          setIsBuffering(false);
+          setRetryAttempts(0);
+          setPlaybackError(null);
+        }}
         onSeeking={() => {
           if (videoRef.current && !isTranscodedRef.current && !isTimeCachedInIndexedDB(videoRef.current.currentTime)) {
             setIsBuffering(true);
@@ -1795,7 +2051,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           const savedPos = lastKnownTimeRef.current;
 
           // 1. Mantém a MESMA fonte/qualidade/idioma e reconecta exatamente onde parou!
-          if (retryAttempts < 2) {
+          if (retryAttempts < 4) {
             setRetryAttempts((prev) => prev + 1);
             setIsBuffering(true);
             if (currentTorrent.magnetUri) {
@@ -1803,15 +2059,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
             setTimeout(() => {
               reconnectStreamAtTime(savedPos, !userPausedRef.current);
-            }, 1300);
+            }, 1800);
             return;
           }
 
-          // 2. Só troca de seed automaticamente se falhou logo na abertura (< 5s) e APENAS no mesmo idioma + mesma qualidade!
-          if (savedPos < 5) {
-            const switchedSameQuality = switchToNextStableSameQualitySeed(false);
-            if (switchedSameQuality) return;
-          }
+          // 2. Se após 4 tentativas a semente atual ainda falhar, tenta automaticamente a próxima semente ativa da mesma qualidade/idioma mantendo o minuto exato!
+          const switchedSameQuality = switchToNextStableSameQualitySeed(false);
+          if (switchedSameQuality) return;
 
           setPlaybackError(
             `Conexão P2P oscilou em ${formatTime(savedPos)} (${preferredQuality} · ${currentTorrent.isPortugueseAudio ? 'PT-BR' : 'Original'
@@ -2142,8 +2396,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
           {/* Diálogo de Recuperação sem Perder o Ponto do Filme */}
           {playbackError && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xl animate-in fade-in">
-              <div className="max-w-md w-full glass-panel p-6 rounded-2xl border border-white/10 text-center space-y-4 shadow-2xl">
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/75">
+              <div className="max-w-md w-full liquid-glass-heavy p-6 rounded-2xl text-center space-y-4 shadow-2xl">
                 <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
                   <Wifi className="w-6 h-6" />
                 </div>
@@ -2155,7 +2409,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
 
                 {torrentsPool.length > 1 && (
-                  <div className="text-left space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  <div className="text-left space-y-1.5 max-h-40 overflow-y-auto no-scrollbar pr-1">
                     <span className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">
                       Outras fontes disponíveis (mantendo {formatTime(lastKnownTimeRef.current)}):
                     </span>
@@ -2427,29 +2681,74 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               )}
             </div>
 
-            {/* Scrubber Minimalista */}
-            <div className="relative w-full group/scrubber cursor-pointer py-2.5 flex items-center touch-none">
-              <div className="absolute left-0 right-0 h-1 sm:h-1 bg-white/20 rounded-full overflow-hidden pointer-events-none group-hover/scrubber:h-1.5 transition-all">
+            {/* Scrubber Apple TV Liquid Glass Fluido (Sem brilho estourado, sem lag, com preview de minutos/segundos no hover/toque e bloqueio durante carregamento) */}
+            <div
+              ref={scrubberRef}
+              onMouseMove={(e) => {
+                if (!scrubberRef.current) return;
+                const rect = scrubberRef.current.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+                setHoverPercent(pct * 100);
+                setHoverTime(pct * totalEffectiveDuration);
+              }}
+              onMouseLeave={() => setHoverTime(null)}
+              onTouchMove={(e) => {
+                if (!scrubberRef.current || e.touches.length === 0) return;
+                const rect = scrubberRef.current.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.touches[0].clientX - rect.left) / Math.max(1, rect.width)));
+                setHoverPercent(pct * 100);
+                setHoverTime(pct * totalEffectiveDuration);
+              }}
+              onTouchEnd={() => setHoverTime(null)}
+              className={`relative w-full group/scrubber py-3 flex items-center touch-none select-none ${
+                isColdStartBuffering ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+              }`}
+            >
+              {/* Tooltip em Liquid Glass mostrando exatamente os minutos/segundos ao passar o dedo/mouse */}
+              {hoverTime !== null && (
+                <div
+                  style={{
+                    left: `${Math.max(4, Math.min(96, hoverPercent))}%`,
+                    transform: 'translate3d(-50%, 0, 0)'
+                  }}
+                  className="pointer-events-none absolute -top-9 z-40 liquid-glass px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold text-white whitespace-nowrap shadow-lg"
+                >
+                  {formatTime(hoverTime)}
+                  {isColdStartBuffering ? ' · Carregando' : ''}
+                </div>
+              )}
+
+              {/* Trilho de Fundo em Liquid Glass Suave */}
+              <div className="relative w-full h-1.5 group-hover/scrubber:h-2 bg-white/15 rounded-full overflow-hidden pointer-events-none transition-[height] duration-150">
+                {/* Segmentos de Buffer Carregados */}
                 {idbSnapshot.segments.map((seg, index) => (
                   <div
                     key={`${seg.startByte}-${index}`}
-                    className="absolute top-0 bottom-0 bg-white/40 transition-all duration-200"
+                    className="absolute top-0 bottom-0 bg-white/30"
                     style={{
                       left: `${seg.startPercent}%`,
                       width: `${Math.max(0.4, seg.endPercent - seg.startPercent)}%`
                     }}
                   />
                 ))}
+
+                {/* Barra de Progresso Principal Animada com GPU Compositing (Sem lag e sem brilho feio) */}
+                <div
+                  className="absolute top-0 bottom-0 left-0 bg-white rounded-full transition-[width] duration-150 ease-out will-change-[width]"
+                  style={{
+                    width: `${progressPercent}%`,
+                    transform: 'translate3d(0, 0, 0)'
+                  }}
+                />
               </div>
 
+              {/* Indicador Circular Discreto */}
               <div
-                className="absolute left-0 h-1 sm:h-1 bg-white rounded-l-full pointer-events-none z-10 group-hover/scrubber:h-1.5 transition-all duration-75"
-                style={{ width: `${progressPercent}%` }}
-              />
-
-              <div
-                className="absolute w-3.5 h-3.5 sm:w-3 sm:h-3 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.7)] pointer-events-none z-20 -translate-x-1/2 transition-transform group-hover/scrubber:scale-125"
-                style={{ left: `${progressPercent}%` }}
+                className="absolute w-3 h-3 rounded-full bg-white border border-black/30 shadow-md pointer-events-none z-20 -translate-x-1/2 scale-90 group-hover/scrubber:scale-110 transition-transform duration-150"
+                style={{
+                  left: `${progressPercent}%`,
+                  transform: 'translate3d(-50%, 0, 0)'
+                }}
               />
 
               <input
@@ -2458,67 +2757,217 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 max={totalEffectiveDuration > 0 ? totalEffectiveDuration : 100}
                 step={0.5}
                 value={currentTime}
+                disabled={isColdStartBuffering}
                 onChange={handleSeek}
-                className="w-full h-8 -top-3 opacity-0 cursor-pointer absolute inset-0 z-30"
+                className={`w-full h-8 -top-1 opacity-0 absolute inset-0 z-30 ${
+                  isColdStartBuffering ? 'cursor-not-allowed' : 'cursor-pointer'
+                }`}
                 aria-label="Barra de progresso"
               />
             </div>
 
-            {/* Linha Inferior de Horários & Ações */}
-            <div className="flex items-center justify-between text-xs sm:text-[13px] font-mono text-white/80 px-0.5">
+            {/* Linha Inferior de Horarios & Acoes (Com botoes de Legendas e Qualidade SEPARADOS) */}
+            <div className="relative flex items-center justify-between text-xs sm:text-[13px] font-mono text-white/80 px-0.5">
               <span>{formatTime(currentTime)}</span>
 
-              <div className="flex items-center gap-2 sm:gap-3">
-                {/* Legendas */}
+              {/* Menu Popover Exclusivo de Legendas & Audio */}
+              {showSubMenu && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute bottom-11 right-16 sm:right-28 z-50 w-72 liquid-glass-heavy rounded-2xl p-4 shadow-2xl text-white font-sans space-y-3 animate-in fade-in zoom-in-95 duration-150"
+                >
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-white/90">
+                      Legendas & Idioma
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSubMenu(false)}
+                      className="p-1 rounded-full hover:bg-white/10 text-white/70 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                      Áudio Principal
+                    </span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchLanguageMode(true, undefined)}
+                        className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                          currentTorrent.isPortugueseAudio
+                            ? 'bg-white text-black border-white'
+                            : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        Dublado PT-BR
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSwitchLanguageMode(false, undefined)}
+                        className={`py-1.5 px-2.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                          !currentTorrent.isPortugueseAudio
+                            ? 'bg-white text-black border-white'
+                            : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        Original / EN
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+                        Faixas de Legenda
+                      </span>
+                      {subtitlesLoading && (
+                        <span className="text-[10px] text-white/50 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Buscando
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1 max-h-36 overflow-y-auto no-scrollbar pr-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSubtitleId('off');
+                          setShowSubMenu(false);
+                        }}
+                        className={`w-full text-left py-1.5 px-2.5 rounded-lg text-xs border transition-colors cursor-pointer ${
+                          selectedSubtitleId === 'off'
+                            ? 'bg-white text-black font-bold border-white'
+                            : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        Desativadas
+                      </button>
+                      {subtitleTracks.map((tr) => (
+                        <button
+                          key={tr.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSubtitleId(tr.id);
+                            setShowSubMenu(false);
+                          }}
+                          className={`w-full text-left py-1.5 px-2.5 rounded-lg text-xs border transition-colors cursor-pointer ${
+                            selectedSubtitleId === tr.id
+                              ? 'bg-white text-black font-bold border-white'
+                              : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          {tr.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Menu Popover Exclusivo de Qualidade (Separado de Legendas!) */}
+              {showQualityMenu && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute bottom-11 right-8 sm:right-16 z-50 w-64 liquid-glass-heavy rounded-2xl p-4 shadow-2xl text-white font-sans space-y-2.5 animate-in fade-in zoom-in-95 duration-150"
+                >
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-white/90">
+                      Resolução (Quality Cap)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowQualityMenu(false)}
+                      className="p-1 rounded-full hover:bg-white/10 text-white/70 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {FIXED_QUALITY_OPTIONS.map((q) => (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() => handleSelectFixedQuality(q.id)}
+                        className={`w-full py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-between cursor-pointer ${
+                          preferredQuality === q.id
+                            ? 'bg-white text-black border-white shadow-sm'
+                            : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        <span>{q.label}</span>
+                        <span className="text-[10px] opacity-80">{q.badge}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 sm:gap-2.5 font-sans">
+                {/* Botao Dedicado de Legendas (Separado do de Qualidade) */}
                 <button
                   type="button"
                   onClick={() => {
-                    if (selectedSubtitleId !== 'off') {
-                      setSelectedSubtitleId('off');
-                      triggerHud('Legendas Desativadas', 'subtitles');
-                    } else if (subtitleTracks.length > 0) {
-                      const pt = subtitleTracks.find(
-                        (s) =>
-                          s.lang?.toLowerCase().includes('por') ||
-                          s.label?.toLowerCase().includes('portug')
-                      );
-                      const chosenId = pt ? pt.id : subtitleTracks[0].id;
-                      setSelectedSubtitleId(chosenId);
-                      const t = subtitleTracks.find((s) => s.id === chosenId);
-                      triggerHud(`Legenda: ${t?.label || 'Ativada'}`, 'subtitles');
-                    } else {
-                      setShowMobileSettingsSheet(true);
-                    }
+                    const next = !showSubMenu;
+                    closeAllMenus();
+                    setShowSubMenu(next);
                   }}
-                  className={`p-1.5 rounded-full transition-colors cursor-pointer ${selectedSubtitleId !== 'off'
+                  className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    showSubMenu || selectedSubtitleId !== 'off'
                       ? 'bg-white text-black'
-                      : 'text-white/70 hover:text-white hover:bg-white/10'
-                    }`}
-                  title="Legendas"
-                  aria-label="Legendas"
+                      : 'liquid-glass text-white/85 hover:text-white'
+                  }`}
+                  title="Legendas e Áudio"
+                  aria-label="Legendas e Áudio"
                 >
-                  <Subtitles className="w-4 h-4" />
+                  <Subtitles className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Legendas</span>
                 </button>
 
-                {/* Ajustes (Qualidade, Áudio, Velocidade, Legendas) */}
+                {/* Botao Dedicado de Qualidade (Separado do de Legendas) */}
                 <button
                   type="button"
-                  onClick={() => setShowMobileSettingsSheet(true)}
-                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                  title="Ajustes de Reprodução"
+                  onClick={() => {
+                    const next = !showQualityMenu;
+                    closeAllMenus();
+                    setShowQualityMenu(next);
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-extrabold flex items-center gap-1 transition-colors cursor-pointer ${
+                    showQualityMenu
+                      ? 'bg-white text-black'
+                      : 'liquid-glass text-white/90 hover:text-white'
+                  }`}
+                  title="Selecionar Qualidade de Vídeo"
+                  aria-label="Qualidade de Vídeo"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>{isHybridMode ? `${preferredQuality} Hybrid` : preferredQuality}</span>
+                </button>
+
+                {/* Ajustes Avancados (Sincronia de Audio, Velocidade, Mux Hibrido) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeAllMenus();
+                    setShowMobileSettingsSheet(true);
+                  }}
+                  className="p-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Ajustes Avançados e Sincronia de Áudio"
                   aria-label="Ajustes"
                 >
                   <SlidersHorizontal className="w-4 h-4" />
                 </button>
 
-                {/* Transmissão / Cast Padrão (Substitui o botão gigante flutuante) */}
+                {/* Transmissao / Cast Padrao */}
                 <button
                   type="button"
                   onClick={() => {
                     closeAllMenus();
                     setShowCastModal(true);
                   }}
-                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   title="Transmitir para TV / Web Video Caster / AirPlay"
                   aria-label="Transmitir para TV"
                 >
@@ -2532,9 +2981,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   className={`p-1.5 rounded-full transition-colors cursor-pointer ${
                     showTechStats
                       ? 'bg-white text-black'
-                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                      : 'text-white/75 hover:text-white hover:bg-white/10'
                   }`}
-                  title="Telemetria P2P & Mapa de Peças (I)"
+                  title="Telemetria P2P e Mapa de Peças (I)"
                   aria-label="Telemetria P2P"
                 >
                   <Activity className="w-4 h-4" />
@@ -2544,7 +2993,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <button
                     type="button"
                     onClick={onNextEpisode}
-                    className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                     title="Próximo Episódio"
                     aria-label="Próximo Episódio"
                   >
@@ -2556,14 +3005,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <button
                   type="button"
                   onClick={toggleFullscreen}
-                  className="p-1.5 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   title={isFullscreen ? 'Sair da Tela Cheia' : 'Tela Cheia'}
                   aria-label="Tela Cheia"
                 >
                   {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 </button>
 
-                {/* Tempo Restante Negativo (ex: -47:40) */}
+                {/* Tempo Restante Negativo */}
                 <span className="font-mono text-white/80 ml-1">
                   -{formatTime(Math.max(0, totalEffectiveDuration - currentTime))}
                 </span>
@@ -2571,21 +3020,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
           </div>
 
-          {/* PAINEL DE AJUSTES UNIVERSAL (Mobile Bottom Sheet / Desktop Centered Glass Dialog) */}
+          {/* PAINEL DE AJUSTES UNIVERSAL EM LIQUID GLASS (Com Sincronia de Audio -2.0s a +2.0s e Muxing Hibrido) */}
           {showMobileSettingsSheet && (
             <div
               onClick={() => setShowMobileSettingsSheet(false)}
-              className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end sm:justify-center sm:items-center p-0 sm:p-4 animate-in fade-in duration-200"
+              className="fixed inset-0 z-50 bg-black/70 flex flex-col justify-end sm:justify-center sm:items-center p-0 sm:p-4"
             >
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="w-full sm:max-w-md bg-[#11151E] border-t sm:border border-white/20 rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 space-y-4 max-h-[88vh] overflow-y-auto animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 text-white shadow-2xl"
+                className="w-full sm:max-w-md liquid-glass-heavy rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 space-y-4 max-h-[88vh] overflow-y-auto text-white shadow-2xl"
               >
                 {/* Header do Painel */}
                 <div className="flex items-center justify-between border-b border-white/10 pb-3">
                   <div className="flex items-center gap-2">
-                    <SlidersHorizontal className="w-4 h-4 text-white" />
-                    <span className="font-bold text-sm">Opções de Reprodução</span>
+                    <SlidersHorizontal className="w-4 h-4 text-white/90" />
+                    <span className="font-bold text-sm">Configurações e Sincronia</span>
                   </div>
                   <button
                     onClick={() => setShowMobileSettingsSheet(false)}
@@ -2595,29 +3044,127 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                 </div>
 
-                {/* Qualidade Fixa (720p, 1080p Padrão, 4K) */}
+                {/* Qualidade Fixa (720p, 1080p Padrao, 4K) */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Qualidade de Vídeo</label>
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">
+                    Qualidade de Vídeo (Quality Cap)
+                  </label>
                   <div className="grid grid-cols-3 gap-2">
                     {FIXED_QUALITY_OPTIONS.map((q) => (
                       <button
                         key={q.id}
-                        onClick={() => {
-                          handleSelectFixedQuality(q.id);
-                        }}
-                        className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-colors flex flex-col items-center justify-center gap-0.5 cursor-pointer ${preferredQuality === q.id
+                        onClick={() => handleSelectFixedQuality(q.id)}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-colors flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+                          preferredQuality === q.id
                             ? 'bg-white text-black border-white shadow-md'
                             : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
-                          }`}
+                        }`}
                       >
                         <span>{q.label}</span>
-                        <span className={`text-[10px] font-normal ${preferredQuality === q.id ? 'text-black/70' : 'text-white/50'}`}>
+                        <span
+                          className={`text-[10px] font-normal ${
+                            preferredQuality === q.id ? 'text-black/75' : 'text-white/50'
+                          }`}
+                        >
                           {q.badge}
                         </span>
                       </button>
                     ))}
                   </div>
                 </div>
+
+                {/* FASE 3: Controle de Sincronia de Audio (-2.0s a +2.0s em passos de 0.1s) */}
+                <div className="space-y-2 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                      Sincronia de Áudio
+                    </label>
+                    <span className="text-xs font-mono font-bold text-white">
+                      {audioSyncOffsetSec > 0 ? `+${audioSyncOffsetSec.toFixed(1)}s` : `${audioSyncOffsetSec.toFixed(1)}s`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => applyAudioSyncOffset(audioSyncOffsetSec - 0.1)}
+                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-mono font-bold cursor-pointer"
+                    >
+                      -0.1s
+                    </button>
+                    <input
+                      type="range"
+                      min={-2.0}
+                      max={2.0}
+                      step={0.1}
+                      value={audioSyncOffsetSec}
+                      onChange={(e) => applyAudioSyncOffset(parseFloat(e.target.value))}
+                      className="flex-1 h-1.5 bg-white/20 rounded-lg appearance-none cursor-pointer accent-white"
+                      aria-label="Sincronia de Áudio"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => applyAudioSyncOffset(audioSyncOffsetSec + 0.1)}
+                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-mono font-bold cursor-pointer"
+                    >
+                      +0.1s
+                    </button>
+                    {audioSyncOffsetSec !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => applyAudioSyncOffset(0)}
+                        className="px-2 py-1 rounded-lg bg-white text-black text-[10px] font-bold cursor-pointer"
+                      >
+                        Zero
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* FASE 3: Muxing Hibrido em Tempo Real (Video 1080p/4K EN + Audio 720p PT-BR) */}
+                {hybridPair && (
+                  <div className="p-3 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white">
+                        Muxing Híbrido ({hybridPair.videoTorrent.quality} EN + Áudio PT-BR)
+                      </p>
+                      <p className="text-[11px] text-white/55 truncate">
+                        Combina vídeo de alta definição com faixa dublada 720p sem recodificar
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextHybrid = !isHybridMode;
+                        setIsHybridMode(nextHybrid);
+                        isTranscodedRef.current = nextHybrid || forceTranscode;
+                        const nextUrl = getStreamUrlForTorrent(
+                          nextHybrid ? hybridPair.videoTorrent : currentTorrent,
+                          trackerPriority,
+                          {
+                            isRetry: true,
+                            seekSeconds: lastKnownTimeRef.current > 1.5 ? lastKnownTimeRef.current : undefined,
+                            useHybrid: nextHybrid
+                          }
+                        );
+                        setActiveVideoSrc(nextUrl);
+                        setIsBuffering(true);
+                        showToastNotification(
+                          nextHybrid
+                            ? `Muxing Híbrido ativado (${hybridPair.videoTorrent.quality} + Áudio PT-BR)`
+                            : 'Muxing Híbrido desativado',
+                          3000
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold shrink-0 cursor-pointer transition-colors ${
+                        isHybridMode
+                          ? 'bg-white text-black'
+                          : 'bg-white/10 text-white/80 hover:bg-white/20'
+                      }`}
+                    >
+                      {isHybridMode ? 'Ativo' : 'Ativar'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Velocidade */}
                 <div className="space-y-1.5">
@@ -2627,10 +3174,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <button
                         key={spd}
                         onClick={() => changeSpeed(spd)}
-                        className={`py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${playbackSpeed === spd
+                        className={`py-1.5 rounded-xl text-xs font-mono font-bold border transition-colors ${
+                          playbackSpeed === spd
                             ? 'bg-white text-black border-white'
                             : 'bg-white/5 text-white/80 border-white/10'
-                          }`}
+                        }`}
                       >
                         {spd}x
                       </button>
@@ -2638,26 +3186,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </div>
                 </div>
 
-                {/* Áudio & Idioma */}
+                {/* Audio & Idioma */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Áudio & Dublagem</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => handleSwitchLanguageMode(true, undefined)}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${currentTorrent.isPortugueseAudio
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
+                        currentTorrent.isPortugueseAudio
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                      }`}
                     >
                       <Volume2 className="w-3.5 h-3.5" />
                       <span>Dublado PT-BR</span>
                     </button>
                     <button
                       onClick={() => handleSwitchLanguageMode(false, undefined)}
-                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${!currentTorrent.isPortugueseAudio
+                      className={`py-2 px-3 rounded-xl text-xs font-bold border transition-colors flex items-center justify-center gap-1.5 ${
+                        !currentTorrent.isPortugueseAudio
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                      }`}
                     >
                       <Volume2 className="w-3.5 h-3.5" />
                       <span>Original / Inglês</span>
@@ -2668,19 +3218,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         onClick={() => handleSwitchLanguageMode(true, 0)}
-                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${audioTrackOverride === 0
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
+                          audioTrackOverride === 0
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/70 border-white/10'
-                          }`}
+                        }`}
                       >
                         Dual: Forçar Faixa 1
                       </button>
                       <button
                         onClick={() => handleSwitchLanguageMode(true, 1)}
-                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${audioTrackOverride === 1
+                        className={`py-1.5 px-2 rounded-lg text-[11px] border ${
+                          audioTrackOverride === 1
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/70 border-white/10'
-                          }`}
+                        }`}
                       >
                         Dual: Forçar Faixa 2
                       </button>
@@ -2701,10 +3253,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
                     <button
                       onClick={() => setSelectedSubtitleId('off')}
-                      className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${selectedSubtitleId === 'off'
+                      className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
+                        selectedSubtitleId === 'off'
                           ? 'bg-white text-black font-bold border-white'
                           : 'bg-white/5 text-white/80 border-white/10'
-                        }`}
+                      }`}
                     >
                       Desativadas (Padrão)
                     </button>
@@ -2712,10 +3265,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <button
                         key={tr.id}
                         onClick={() => setSelectedSubtitleId(tr.id)}
-                        className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${selectedSubtitleId === tr.id
+                        className={`w-full text-left py-1.5 px-3 rounded-lg text-xs border ${
+                          selectedSubtitleId === tr.id
                             ? 'bg-white text-black font-bold border-white'
                             : 'bg-white/5 text-white/80 border-white/10'
-                          }`}
+                        }`}
                       >
                         {tr.label}
                       </button>
@@ -2740,10 +3294,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <button
                           key={sz}
                           onClick={() => changeSubtitleSize(sz)}
-                          className={`py-1 rounded-lg text-xs border ${subtitleSize === sz
+                          className={`py-1 rounded-lg text-xs border ${
+                            subtitleSize === sz
                               ? 'bg-white text-black font-bold border-white'
                               : 'bg-white/5 text-white/70 border-white/10'
-                            }`}
+                          }`}
                         >
                           {lbl}
                         </button>
@@ -2794,11 +3349,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             return (
               <div
                 onClick={() => setShowCastModal(false)}
-                className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl animate-in fade-in duration-200"
+                className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/75"
               >
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="w-full max-w-2xl max-h-[90vh] overflow-y-auto glass-dropdown rounded-3xl p-5 sm:p-7 border border-white/15 shadow-2xl space-y-5 text-white"
+                  className="w-full max-w-2xl max-h-[90vh] overflow-y-auto liquid-glass-heavy rounded-3xl p-5 sm:p-7 shadow-2xl space-y-5 text-white"
                 >
                   <div className="flex items-start justify-between gap-3 border-b border-white/10 pb-4">
                     <div>

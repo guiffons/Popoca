@@ -33,7 +33,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)' }}
       className="md:hidden fixed bottom-2 left-2 right-2 z-40 pointer-events-none flex justify-center"
     >
-      <nav className="pointer-events-auto w-full max-w-lg glass-capsule rounded-full p-1.5 shadow-2xl">
+      <nav className="pointer-events-auto w-full max-w-lg liquid-glass rounded-full p-1.5 shadow-2xl">
         <div className="grid grid-cols-6 items-center">
           {tabs.map((tab) => {
             const Icon = tab.icon;

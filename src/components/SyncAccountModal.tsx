@@ -223,8 +223,8 @@ export const SyncAccountModal: React.FC<SyncAccountModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xl animate-in fade-in duration-200">
-      <div className="w-full max-w-xl rounded-3xl glass-dropdown overflow-hidden flex flex-col max-h-[90vh] text-slate-900 dark:text-white">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+      <div className="w-full max-w-xl rounded-3xl liquid-glass-heavy overflow-hidden flex flex-col max-h-[90vh] text-slate-900 dark:text-white">
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-slate-200/80 dark:border-white/[0.08] flex items-center justify-between">
           <div className="flex items-center gap-3">

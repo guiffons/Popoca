@@ -18,7 +18,12 @@ import dns from 'dns';
 import stream from 'stream';
 import { fileURLToPath } from 'url';
 import { tmdbService } from './server/tmdbService.ts';
-import { indexerService, type TrackerPriorityMode } from './server/indexerService.ts';
+import {
+  indexerService,
+  selectQualityCappedCandidates,
+  normalizeQuality,
+  type TrackerPriorityMode
+} from './server/indexerService.ts';
 import { torrentEngine, parseTorrentBuffer } from './server/torrentEngine.ts';
 import { subtitleService } from './server/subtitleService.ts';
 import { syncService } from './server/syncService.ts';
@@ -113,19 +118,22 @@ function parseSafeFloat(val: unknown, fallback: number, min?: number, max?: numb
   return n;
 }
 
-function validateMagnet(magnet: unknown): { valid: boolean; error?: string } {
-  if (typeof magnet !== 'string' || !magnet) {
+const STRICT_MAGNET_REGEX = /^magnet:\?(?:[^&\s]*&)*xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})(?:[&#]|$)/i;
+const MAX_MAGNET_LENGTH = 4096;
+
+export function validateMagnet(magnet: unknown): { valid: boolean; error?: string } {
+  if (typeof magnet !== 'string' || !magnet.trim()) {
     return { valid: false, error: 'Magnet URI ausente.' };
   }
-  if (magnet.length > 4096) {
-    return { valid: false, error: 'Magnet URI muito longo (máximo 4096 caracteres).' };
+  const clean = magnet.trim();
+  if (clean.length > MAX_MAGNET_LENGTH) {
+    return { valid: false, error: `Magnet URI excede o limite de segurança (${MAX_MAGNET_LENGTH} caracteres).` };
   }
-  if (!magnet.startsWith('magnet:?')) {
+  if (!clean.startsWith('magnet:?')) {
     return { valid: false, error: 'Formato inválido de link Magnet (deve iniciar com magnet:?).' };
   }
-  const hasBtih = /xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i.test(magnet);
-  if (!hasBtih) {
-    return { valid: false, error: 'Magnet URI não contém um infoHash válido (xt=urn:btih:).' };
+  if (!STRICT_MAGNET_REGEX.test(clean)) {
+    return { valid: false, error: 'Magnet URI não contém um infoHash BTIH válido (xt=urn:btih:).' };
   }
   return { valid: true };
 }
@@ -231,8 +239,15 @@ function createRateLimiter(windowMs: number, maxRequests: number, message: strin
   };
 }
 
-const authLimiter = createRateLimiter(60 * 1000, 20, 'Muitas tentativas de autenticação. Aguarde um minuto.');
-const streamLimiter = createRateLimiter(60 * 1000, 60, 'Muitas requisições de reprodução simultâneas.');
+const authLimiter = createRateLimiter(60 * 1000, 30, 'Muitas tentativas de autenticação. Aguarde um minuto.');
+const rawStreamLimiter = createRateLimiter(60 * 1000, 600, 'Muitas requisições de reprodução simultâneas.');
+const streamLimiter = (req: Request, res: Response, next: NextFunction) => {
+  const range = req.headers.range;
+  if (typeof range === 'string' && range.startsWith('bytes=') && !range.startsWith('bytes=0-')) {
+    return next();
+  }
+  return rawStreamLimiter(req, res, next);
+};
 
 // ===== AUTORIZAÇÃO E SESSÕES =====
 
@@ -321,7 +336,7 @@ async function bootstrap() {
     })
   );
 
-  // 2. CORS com validação de origens do app
+  // 2. CORS com validacao explicita do dominio da Vercel (popocas.vercel.app) e ambientes locais
   const allowedOriginsEnv = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim().toLowerCase())
     : [];
@@ -332,6 +347,8 @@ async function bootstrap() {
         if (!origin) return callback(null, true);
         const lower = origin.toLowerCase();
         if (
+          lower === 'https://popocas.vercel.app' ||
+          lower.endsWith('.vercel.app') ||
           lower.startsWith('http://localhost:') ||
           lower.startsWith('http://127.0.0.1:') ||
           lower.startsWith('http://192.168.') ||
@@ -341,9 +358,19 @@ async function bootstrap() {
         ) {
           return callback(null, true);
         }
-        return callback(null, true);
+        return callback(null, false);
       },
-      credentials: true
+      credentials: true,
+      exposedHeaders: [
+        'X-Popoca-Stream-Mode',
+        'X-Popoca-Active-Hash',
+        'X-Popoca-Audio-Hash',
+        'X-Popoca-Real-Lang',
+        'X-Popoca-Quality-Fallback',
+        'X-Popoca-Fallback-Message',
+        'Content-Range',
+        'Accept-Ranges'
+      ]
     })
   );
 
@@ -602,11 +629,21 @@ async function bootstrap() {
       const title = String(req.query.title || '').slice(0, 140);
       const originalTitle = req.query.originalTitle ? String(req.query.originalTitle).slice(0, 140) : undefined;
       const year = req.query.year ? String(req.query.year).slice(0, 4) : undefined;
-      const imdbId = req.query.imdbId ? String(req.query.imdbId).slice(0, 20) : undefined;
+      let imdbId = req.query.imdbId ? String(req.query.imdbId).slice(0, 20) : undefined;
+      const tmdbId = req.query.tmdbId ? parseSafeInt(req.query.tmdbId, 0, 1) : 0;
       const mediaType = (req.query.mediaType as 'movie' | 'tv' | 'anime') || 'movie';
       const season = req.query.season ? parseSafeInt(req.query.season, 1, 1, 100) : undefined;
       const episode = req.query.episode ? parseSafeInt(req.query.episode, 1, 1, 1000) : undefined;
       const trackerPriority = parsePriorityMode(req.query.trackerPriority);
+
+      if (!imdbId && tmdbId > 0) {
+        try {
+          const details = await tmdbService.getDetails(tmdbId, mediaType);
+          if (details?.imdb_id) {
+            imdbId = details.imdb_id;
+          }
+        } catch {}
+      }
 
       if (!title && !imdbId) {
         res.status(400).json({ success: false, error: 'Parâmetro title ou imdbId é obrigatório' });
@@ -681,7 +718,79 @@ async function bootstrap() {
     }
   });
 
+  app.post('/api/torrent/destroy', (req: Request, res: Response) => {
+    try {
+      const magnet = req.body?.magnet as string | undefined;
+      const infoHash = req.body?.infoHash as string | undefined;
+
+      let hash: string | null = null;
+      if (magnet) {
+        const magCheck = validateMagnet(magnet);
+        if (magCheck.valid) {
+          const match = magnet.match(/btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i);
+          if (match) hash = match[1].toLowerCase();
+        }
+      } else if (infoHash && typeof infoHash === 'string') {
+        const trimmed = infoHash.trim();
+        if (/^[a-fA-F0-9]{40}$/.test(trimmed) || /^[a-zA-Z2-7]{32}$/.test(trimmed)) {
+          hash = trimmed.toLowerCase();
+        }
+      }
+
+      if (hash) {
+        torrentEngine.destroyEngine(hash, false);
+        res.json({ success: true, destroyedHash: hash });
+      } else {
+        res.status(400).json({ success: false, error: 'Magnet URI ou infoHash válido é obrigatório.' });
+      }
+    } catch (err: any) {
+      sendSafeError(res, 500, 'Erro ao destruir motor torrent.', err);
+    }
+  });
+
   // ===== STREAMING DE VÍDEO HTTP 206 (COM CONTROLE DE CAPACIDADE E RATE LIMIT) =====
+
+  // ===== FASE 3: ROTA DE MUXING HIBRIDO EM TEMPO REAL (VIDEO 4K/1080P EN + AUDIO 720P PT-BR) =====
+
+  app.get('/api/stream/hybrid', streamLimiter, async (req: Request, res: Response) => {
+    try {
+      const videoMagnet = req.query.videoMagnet as string;
+      const audioMagnet = req.query.audioMagnet as string;
+
+      const vCheck = validateMagnet(videoMagnet);
+      if (!vCheck.valid) {
+        res.status(400).json({ success: false, error: `videoMagnet inválido: ${vCheck.error}` });
+        return;
+      }
+      const aCheck = validateMagnet(audioMagnet);
+      if (!aCheck.valid) {
+        res.status(400).json({ success: false, error: `audioMagnet inválido: ${aCheck.error}` });
+        return;
+      }
+
+      const seekSeconds = req.query.seek ? parseSafeFloat(req.query.seek, 0, 0, 86400) : undefined;
+      const audioDelayMs = req.query.audioDelayMs
+        ? parseSafeFloat(req.query.audioDelayMs, 0, -2000, 2000)
+        : undefined;
+      const trackerPriority = parsePriorityMode(req.query.trackerPriority);
+      const season = req.query.season ? parseSafeInt(req.query.season, 1, 1, 100) : undefined;
+      const episode = req.query.episode ? parseSafeInt(req.query.episode, 1, 1, 1000) : undefined;
+
+      await torrentEngine.handleHybridStreamRequest(req, res, videoMagnet, audioMagnet, {
+        seekSeconds,
+        audioDelayMs,
+        trackerPriority,
+        season,
+        episode
+      });
+    } catch (err: any) {
+      if (!res.headersSent) {
+        sendSafeError(res, 503, 'Não foi possível iniciar o Muxing Híbrido em tempo real.', err);
+      }
+    }
+  });
+
+  // ===== STREAMING DE VIDEO HTTP 206 (COM QUALITY CAP E HEALTH CHECK DE 5S) =====
 
   app.get('/api/stream/:tmdbId', streamLimiter, async (req: Request, res: Response) => {
     try {
@@ -723,31 +832,19 @@ async function bootstrap() {
         trackerPriority
       });
 
-      const validTorrents = torrents.filter((t) => Boolean(t.magnetUri));
-      const langFiltered = preferPortugueseAudio
-        ? validTorrents.filter((t) => t.isPortugueseAudio)
-        : validTorrents.filter((t) => !t.isPortugueseAudio);
-      const languagePool = langFiltered.length > 0 ? langFiltered : validTorrents;
+      const {
+        requestedQuality,
+        primaryCandidates,
+        fallbackCandidates,
+        fallbackQuality
+      } = selectQualityCappedCandidates(torrents, preferredQuality, preferPortugueseAudio);
 
-      const sameQualityCandidates = preferredQuality
-        ? languagePool.filter((t) => t.quality === preferredQuality)
-        : [];
-      let topCandidates = (
-        sameQualityCandidates.length > 0 ? sameQualityCandidates : languagePool
-      ).slice(0, 4);
+      const topCandidates = primaryCandidates.slice(0, 3);
+      const bestFallback = fallbackCandidates[0];
 
-      if (!seekSeconds && topCandidates.length > 1) {
-        const fastMagnet = await torrentEngine.raceLiveCandidates(
-          topCandidates.map((c) => c.magnetUri),
-          trackerPriority
-        );
-        const winnerObj = topCandidates.find((c) => c.magnetUri === fastMagnet);
-        if (winnerObj) {
-          topCandidates = [winnerObj, ...topCandidates.filter((c) => c !== winnerObj)];
-        }
-      }
-
-      for (const candidate of topCandidates) {
+      for (let idx = 0; idx < topCandidates.length; idx++) {
+        const candidate = topCandidates[idx];
+        const isLastPrimary = idx === topCandidates.length - 1;
         try {
           await torrentEngine.handleStreamRequest(
             req,
@@ -762,7 +859,12 @@ async function bootstrap() {
               audioTrackIndex,
               season,
               episode,
-              fileIdx: candidate.fileIdx
+              fileIdx: candidate.fileIdx,
+              preferredQuality: requestedQuality,
+              fallbackMagnet: isLastPrimary ? bestFallback?.magnetUri : undefined,
+              fallbackQuality: isLastPrimary ? fallbackQuality || undefined : undefined,
+              fallbackFileIdx: isLastPrimary ? bestFallback?.fileIdx : undefined,
+              hasAlternatives: !isLastPrimary || Boolean(bestFallback)
             }
           );
           return;
@@ -801,6 +903,9 @@ async function bootstrap() {
     }
 
     const altMagnetsRaw = req.query.altMagnets as string | undefined;
+    const fallbackMagnetRaw = req.query.fallbackMagnet as string | undefined;
+    const fallbackQuality = req.query.fallbackQuality ? normalizeQuality(String(req.query.fallbackQuality)) : undefined;
+    const preferredQuality = req.query.quality ? normalizeQuality(String(req.query.quality)) : undefined;
     const trackerPriority = parsePriorityMode(req.query.trackerPriority);
     const transcode = req.query.transcode === 'true';
     const audioOnly = req.query.audioOnly === 'true';
@@ -813,6 +918,9 @@ async function bootstrap() {
     const season = req.query.season ? parseSafeInt(req.query.season, 1, 1, 100) : undefined;
     const episode = req.query.episode ? parseSafeInt(req.query.episode, 1, 1, 1000) : undefined;
     const fileIdx = req.query.fileIdx ? parseSafeInt(req.query.fileIdx, 0, 0, 500) : undefined;
+
+    const validFallbackMagnet =
+      fallbackMagnetRaw && validateMagnet(fallbackMagnetRaw).valid ? fallbackMagnetRaw : undefined;
 
     const magnetsToTry = [magnet];
     if (altMagnetsRaw) {
@@ -828,18 +936,9 @@ async function bootstrap() {
       } catch {}
     }
 
-    let orderedMagnets = magnetsToTry;
-    if (!seekSeconds && magnetsToTry.length > 1) {
-      const winnerMagnet = await torrentEngine.raceLiveCandidates(
-        magnetsToTry.slice(0, 4),
-        trackerPriority
-      );
-      if (winnerMagnet) {
-        orderedMagnets = [winnerMagnet, ...magnetsToTry.filter((m) => m !== winnerMagnet)];
-      }
-    }
-
-    for (const currentMagnet of orderedMagnets) {
+    for (let i = 0; i < magnetsToTry.length; i++) {
+      const currentMagnet = magnetsToTry[i];
+      const isLastSameQuality = i === magnetsToTry.length - 1;
       try {
         await torrentEngine.handleStreamRequest(
           req,
@@ -854,7 +953,11 @@ async function bootstrap() {
             audioTrackIndex,
             season,
             episode,
-            fileIdx
+            fileIdx: i === 0 ? fileIdx : undefined,
+            preferredQuality,
+            fallbackMagnet: isLastSameQuality ? validFallbackMagnet : undefined,
+            fallbackQuality: isLastSameQuality ? fallbackQuality || '720p' : undefined,
+            hasAlternatives: !isLastSameQuality || Boolean(validFallbackMagnet)
           }
         );
         return;
@@ -934,7 +1037,10 @@ async function bootstrap() {
       return;
     }
     const trackerPriority = parsePriorityMode(req.query.trackerPriority);
-    torrentEngine.preload(magnet, trackerPriority).catch(() => {});
+    const season = req.query.season ? parseSafeInt(req.query.season, 1, 1, 100) : undefined;
+    const episode = req.query.episode ? parseSafeInt(req.query.episode, 1, 1, 1000) : undefined;
+    const fileIdx = req.query.fileIdx !== undefined ? parseSafeInt(req.query.fileIdx, 0, 0, 500) : undefined;
+    torrentEngine.preload(magnet, trackerPriority, { season, episode, fileIdx }).catch(() => {});
     res.json({ success: true, status: 'preloading_initiated' });
   });
 
@@ -1270,14 +1376,26 @@ async function bootstrap() {
 </html>`);
   });
 
-  // Healthcheck para orquestradores (Docker, Render, Kubernetes, etc.)
+  // Healthcheck super leve para Render keep-alive e Docker (Fase 2 & Fase 4)
   app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({
-      status: 'healthy',
-      uptime: process.uptime(),
+    const sqliteOk = db.ping();
+    const mem = process.memoryUsage();
+    const freeMem = os.freemem();
+    const totalMem = os.totalmem();
+    res.status(200).json({
+      status: sqliteOk ? 'healthy' : 'degraded',
+      sqlite: sqliteOk ? 'connected' : 'disconnected',
+      uptime: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
       activeEngines: torrentEngine.getActiveEnginesCount?.() ?? 0,
-      memory: process.memoryUsage().rss
+      memory: mem.rss,
+      memoryDetails: {
+        rssMb: Math.round(mem.rss / 1048576),
+        heapUsedMb: Math.round(mem.heapUsed / 1048576),
+        freeSystemMb: Math.round(freeMem / 1048576),
+        totalSystemMb: Math.round(totalMem / 1048576),
+        renderLimitMb: 512
+      }
     });
   });
 

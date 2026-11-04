@@ -108,7 +108,7 @@ export const TorrentStatsBar: React.FC<TorrentStatsBarProps> = ({
   if (!stats) {
     return (
       <div
-        className={`glass-panel rounded-2xl p-3 border border-white/10 text-white/70 text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-xl ${className}`}
+        className={`liquid-glass rounded-2xl p-3 text-white/70 text-xs flex items-center justify-between gap-3 shadow-2xl ${className}`}
       >
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 animate-spin text-white/50" />
@@ -132,7 +132,7 @@ export const TorrentStatsBar: React.FC<TorrentStatsBarProps> = ({
   return (
     <aside
       aria-label="Telemetria P2P"
-      className={`glass-panel rounded-2xl border border-white/15 text-white shadow-2xl backdrop-blur-2xl transition-all duration-300 max-w-lg w-full ${className}`}
+      className={`liquid-glass rounded-2xl text-white shadow-2xl transition-all duration-300 max-w-lg w-full ${className}`}
     >
       {/* Barra de Título / Cabeçalho Rápido */}
       <div className="p-3 sm:p-3.5 flex items-center justify-between gap-2 border-b border-white/10 select-none">
@@ -278,12 +278,12 @@ export const TorrentStatsBar: React.FC<TorrentStatsBarProps> = ({
                   onClick={() => handleSwitchProfile('pt-br-stability')}
                   className={`py-1.5 px-2 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer flex flex-col items-center justify-center ${
                     selectedProfile === 'pt-br-stability'
-                      ? 'bg-white text-black font-bold border-white shadow-sm'
+                      ? 'bg-white text-black font-bold border-white shadow-[0_0_12px_rgba(255,255,255,0.25)]'
                       : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10'
                   }`}
                 >
-                  <span>🇧🇷 PT-BR</span>
-                  <span className={`text-[9px] ${selectedProfile === 'pt-br-stability' ? 'text-black/70' : 'text-white/40'}`}>
+                  <span>PT-BR</span>
+                  <span className={`text-[9px] ${selectedProfile === 'pt-br-stability' ? 'text-black/75' : 'text-white/40'}`}>
                     Estabilidade
                   </span>
                 </button>
@@ -293,12 +293,12 @@ export const TorrentStatsBar: React.FC<TorrentStatsBarProps> = ({
                   onClick={() => handleSwitchProfile('ultra-speed')}
                   className={`py-1.5 px-2 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer flex flex-col items-center justify-center ${
                     selectedProfile === 'ultra-speed'
-                      ? 'bg-white text-black font-bold border-white shadow-sm'
+                      ? 'bg-white text-black font-bold border-white shadow-[0_0_12px_rgba(255,255,255,0.25)]'
                       : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10'
                   }`}
                 >
-                  <span>⚡ Ultra</span>
-                  <span className={`text-[9px] ${selectedProfile === 'ultra-speed' ? 'text-black/70' : 'text-white/40'}`}>
+                  <span>Ultra</span>
+                  <span className={`text-[9px] ${selectedProfile === 'ultra-speed' ? 'text-black/75' : 'text-white/40'}`}>
                     Velocidade
                   </span>
                 </button>
@@ -308,12 +308,12 @@ export const TorrentStatsBar: React.FC<TorrentStatsBarProps> = ({
                   onClick={() => handleSwitchProfile('global-balanced')}
                   className={`py-1.5 px-2 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer flex flex-col items-center justify-center ${
                     selectedProfile === 'global-balanced'
-                      ? 'bg-white text-black font-bold border-white shadow-sm'
+                      ? 'bg-white text-black font-bold border-white shadow-[0_0_12px_rgba(255,255,255,0.25)]'
                       : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10'
                   }`}
                 >
-                  <span>🌐 Global</span>
-                  <span className={`text-[9px] ${selectedProfile === 'global-balanced' ? 'text-black/70' : 'text-white/40'}`}>
+                  <span>Global</span>
+                  <span className={`text-[9px] ${selectedProfile === 'global-balanced' ? 'text-black/75' : 'text-white/40'}`}>
                     Balanceado
                   </span>
                 </button>

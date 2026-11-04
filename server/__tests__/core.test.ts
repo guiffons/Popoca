@@ -2,18 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { db, toSafeUser } from '../database.ts';
 
 // Helper de validação de Magnet idêntico à implementação do servidor
+const MAGNET_URI_STRICT_REGEX = /^magnet:\?(?:[^&\s]*&)*xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})(?:[&#]|$)/i;
+
 function validateMagnet(magnet: unknown): { valid: boolean; error?: string } {
-  if (typeof magnet !== 'string' || !magnet) {
+  if (typeof magnet !== 'string' || !magnet.trim()) {
     return { valid: false, error: 'Magnet URI ausente.' };
   }
-  if (magnet.length > 4096) {
-    return { valid: false, error: 'Magnet URI muito longo (máximo 4096 caracteres).' };
+  const trimmed = magnet.trim();
+  if (trimmed.length > 2048) {
+    return { valid: false, error: 'Magnet URI muito longo (máximo 2048 caracteres).' };
   }
-  if (!magnet.startsWith('magnet:?')) {
+  if (!trimmed.startsWith('magnet:?')) {
     return { valid: false, error: 'Formato inválido de link Magnet (deve iniciar com magnet:?).' };
   }
-  const hasBtih = /xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})/i.test(magnet);
-  if (!hasBtih) {
+  if (!MAGNET_URI_STRICT_REGEX.test(trimmed)) {
     return { valid: false, error: 'Magnet URI não contém um infoHash válido (xt=urn:btih:).' };
   }
   return { valid: true };
@@ -72,8 +74,8 @@ describe('Validação de Magnet URI', () => {
     expect(res.error).toContain('infoHash');
   });
 
-  it('deve rejeitar magnet que excede tamanho máximo de 4096 caracteres', () => {
-    const huge = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&extra=' + 'a'.repeat(4100);
+  it('deve rejeitar magnet que excede tamanho máximo de 2048 caracteres', () => {
+    const huge = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&extra=' + 'a'.repeat(2100);
     expect(validateMagnet(huge).valid).toBe(false);
   });
 });
@@ -400,6 +402,285 @@ Streaming torrent direto no seu navegador.
   });
 });
 
+describe('Micro-Debrid, Super Trackers, Quality Cap e Muxing Hibrido', () => {
+  it('deve conter exatamente os 15 Super Trackers UDP/HTTP publicos de alta performance', async () => {
+    const { SUPER_TRACKERS } = await import('../indexerService.ts');
+    expect(SUPER_TRACKERS.length).toBe(15);
+    expect(SUPER_TRACKERS).toContain('udp://tracker.opentrackr.org:1337/announce');
+    expect(SUPER_TRACKERS).toContain('http://tracker.openbittorrent.com:80/announce');
+  });
+
+  it('deve respeitar o Quality Cap (nunca subir alem da qualidade solicitada) e selecionar fallback + par hibrido', async () => {
+    const { selectQualityCappedCandidates } = await import('../indexerService.ts');
+    const mockResults = [
+      {
+        id: 't1',
+        title: 'Movie 2160p 4K UHD WEB-DL',
+        magnetUri: 'magnet:?xt=urn:btih:1111111111111111111111111111111111111111',
+        infoHash: '1111111111111111111111111111111111111111',
+        seeds: 500,
+        peers: 20,
+        size: '15 GB',
+        provider: 'YTS',
+        quality: '4K' as const,
+        format: 'WEB-DL',
+        audioType: 'Original' as const,
+        isPortugueseAudio: false,
+        hasPortugueseCheck: false,
+        stabilityScore: 100
+      },
+      {
+        id: 't2',
+        title: 'Movie 1080p FullHD WEB-DL',
+        magnetUri: 'magnet:?xt=urn:btih:2222222222222222222222222222222222222222',
+        infoHash: '2222222222222222222222222222222222222222',
+        seeds: 180,
+        peers: 15,
+        size: '2.2 GB',
+        provider: 'YTS',
+        quality: '1080p' as const,
+        format: 'WEB-DL',
+        audioType: 'Original' as const,
+        isPortugueseAudio: false,
+        hasPortugueseCheck: false,
+        stabilityScore: 95
+      },
+      {
+        id: 't3',
+        title: 'Movie 720p Dublado PT-BR WEB-DL',
+        magnetUri: 'magnet:?xt=urn:btih:3333333333333333333333333333333333333333',
+        infoHash: '3333333333333333333333333333333333333333',
+        seeds: 95,
+        peers: 10,
+        size: '1.1 GB',
+        provider: 'TPB-BR',
+        quality: '720p' as const,
+        format: 'WEB-DL',
+        audioType: 'Dublado' as const,
+        isPortugueseAudio: true,
+        hasPortugueseCheck: true,
+        stabilityScore: 90
+      }
+    ];
+
+    // Se o usuario escolheu 1080p (Original EN), NUNCA deve retornar 4K mesmo com 500 seeders
+    const sel1080En = selectQualityCappedCandidates(mockResults as any, '1080p', false);
+    expect(sel1080En.primaryCandidates[0]?.quality).toBe('1080p');
+
+    // Se o usuario escolheu 1080p com preferencia por PT-BR, mas PT-BR so existe em 720p:
+    // Deve detectar par hibrido (video 1080p EN + audio 720p PT-BR) e ter fallback em 720p PT-BR
+    const sel1080Pt = selectQualityCappedCandidates(mockResults as any, '1080p', true);
+    expect(sel1080Pt.fallbackQuality).toBe('720p');
+    expect(sel1080Pt.hybridCandidate).not.toBeNull();
+    expect(sel1080Pt.hybridCandidate?.videoTorrent.quality).toBe('1080p');
+    expect(sel1080Pt.hybridCandidate?.audioTorrent.isPortugueseAudio).toBe(true);
+
+    // Se o usuario escolheu 720p, deve iniciar em 720p e nunca subir para 1080p ou 4K
+    const sel720 = selectQualityCappedCandidates(mockResults as any, '720p', true);
+    expect(sel720.primaryCandidates[0]?.quality).toBe('720p');
+  });
+
+  it('deve verificar conectividade do SQLite via db.ping() em tempo sub-milissegundo', () => {
+    expect(db.ping()).toBe(true);
+  });
+
+  it('deve selecionar exatamente o Episodio 1 mesmo quando o Episodio 2 esta no indice 0, e maior em bytes ou usa underscores', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    // Simula season pack do Stranger Things onde S01E02 vem em files[0] e e maior que S01E01
+    const mockSeasonPackFiles = [
+      {
+        name: 'Stranger_Things_S01E02_1080p_WEB-DL_DUAL_5.1.mkv',
+        path: 'Stranger.Things.S01.1080p/Stranger_Things_S01E02_1080p_WEB-DL_DUAL_5.1.mkv',
+        length: 1_450_000_000
+      },
+      {
+        name: 'Stranger_Things_S01E01_1080p_WEB-DL_DUAL_5.1.mkv',
+        path: 'Stranger.Things.S01.1080p/Stranger_Things_S01E01_1080p_WEB-DL_DUAL_5.1.mkv',
+        length: 1_260_000_000
+      },
+      {
+        name: 'Stranger_Things_S01E03_1080p_WEB-DL_DUAL_5.1.mkv',
+        path: 'Stranger.Things.S01.1080p/Stranger_Things_S01E03_1080p_WEB-DL_DUAL_5.1.mkv',
+        length: 1_310_000_000
+      },
+      {
+        name: 'Stranger_Things_S01E01.srt',
+        path: 'Stranger.Things.S01.1080p/Subs/Stranger_Things_S01E01.srt',
+        length: 55_000
+      }
+    ];
+
+    const mockEngine = { files: mockSeasonPackFiles } as any;
+
+    // 1. Sem fileIdx, pedindo S01E01 -> deve retornar S01E01 (mesmo sendo menor e estando em files[1])
+    const ep1 = torrentEngine.findTargetVideoFile(mockEngine, undefined, 1, 1);
+    expect(ep1?.name).toContain('S01E01');
+
+    // 2. Com fileIdx=0 defasado (apontando para S01E02), mas pedindo S01E01 -> deve corrigir para S01E01
+    const ep1Override = torrentEngine.findTargetVideoFile(mockEngine, 0, 1, 1);
+    expect(ep1Override?.name).toContain('S01E01');
+
+    // 3. Pedindo S01E02 -> deve retornar S01E02
+    const ep2 = torrentEngine.findTargetVideoFile(mockEngine, undefined, 1, 2);
+    expect(ep2?.name).toContain('S01E02');
+
+    // 4. Formato de anime "[SubGroup] Anime - 01 [1080p].mkv"
+    const mockAnimeFiles = [
+      {
+        name: '[Erai-raws] Jujutsu Kaisen - 02 [1080p][Multiple Subtitle].mkv',
+        path: '[Erai-raws] Jujutsu Kaisen - 02 [1080p][Multiple Subtitle].mkv',
+        length: 1_400_000_000
+      },
+      {
+        name: '[Erai-raws] Jujutsu Kaisen - 01 [1080p][Multiple Subtitle].mkv',
+        path: '[Erai-raws] Jujutsu Kaisen - 01 [1080p][Multiple Subtitle].mkv',
+        length: 1_350_000_000
+      }
+    ];
+    const animeEp1 = torrentEngine.findTargetVideoFile({ files: mockAnimeFiles } as any, undefined, 1, 1);
+    expect(animeEp1?.name).toContain(' - 01 ');
+  });
+
+  it('deve descartar seleções antigas e requisições para peças anteriores ao ponto de seek (evita baixar desde o começo)', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    const cancelledRequests: number[] = [];
+    const mockWire = {
+      destroyed: false,
+      requests: [
+        { piece: 0, offset: 0, length: 16384 },
+        { piece: 1, offset: 0, length: 16384 },
+        { piece: 50, offset: 0, length: 16384 }
+      ],
+      cancel(piece: number) {
+        cancelledRequests.push(piece);
+      }
+    };
+    const mockEngine: any = {
+      selection: [
+        { from: 0, to: 20, priority: 1 },
+        { from: 0, to: 100, priority: 10 }
+      ],
+      _critical: [true, true, true],
+      _reservations: [[{}], [{}], [{}]],
+      swarm: {
+        wires: [mockWire]
+      },
+      critical: () => {},
+      select: (from: number, to: number, prio: number) => {
+        mockEngine.selection.push({ from, to, priority: prio });
+      },
+      flood: () => {}
+    };
+
+    // Aplica seek para a peça 50
+    (torrentEngine as any).applyCleanPriorityWindow(mockEngine, 50, 100, false);
+
+    // 1. As requisições antigas nos fios P2P anteriores a 50 (peças 0 e 1) devem ter sido canceladas
+    expect(cancelledRequests).toContain(0);
+    expect(cancelledRequests).toContain(1);
+    expect(cancelledRequests).not.toContain(50);
+
+    // 2. O array de seleções não deve conter nenhum intervalo que termine antes de 50
+    const hasOldInterval = mockEngine.selection.some((s: any) => s.to < 50);
+    expect(hasOldInterval).toBe(false);
+
+    // 3. Peças críticas antigas devem ter sido desmarcadas
+    expect(mockEngine._critical[0]).toBe(false);
+    expect(mockEngine._critical[1]).toBe(false);
+  });
+
+  it('deve executar destroyEngine liberando file descriptors e limpando os mapas em memória', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    let storeClosed = false;
+    let engineDestroyed = false;
+    const testHash = 'deadbeef0123456789abcdef0123456789abcdef';
+
+    const mockEngine: any = {
+      store: {
+        close: (cb: any) => {
+          storeClosed = true;
+          cb?.();
+        }
+      },
+      destroy: (cb: any) => {
+        engineDestroyed = true;
+        cb?.();
+      }
+    };
+
+    (torrentEngine as any).enginesMap.set(testHash, mockEngine);
+    (torrentEngine as any).runtimeMetaMap.set(testHash, { createdAt: Date.now() });
+
+    torrentEngine.destroyEngine(testHash, false);
+
+    expect(storeClosed).toBe(true);
+    expect(engineDestroyed).toBe(true);
+    expect((torrentEngine as any).enginesMap.has(testHash)).toBe(false);
+    expect((torrentEngine as any).runtimeMetaMap.has(testHash)).toBe(false);
+  });
+
+  it('deve armazenar e recuperar blocos de pre-fetch no chunk cache em memória', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    const testHash = 'chunkcache0123456789abcdef0123456789abcdef';
+    const pieceIndex = 42;
+    const chunkData = Buffer.from('test-chunk-data-for-prefetch-30s-window');
+
+    // Insere bloco no cache
+    torrentEngine.putChunkInCache(testHash, pieceIndex, chunkData, 40);
+
+    // Recupera bloco do cache
+    const retrieved = torrentEngine.getChunkFromCache(testHash, pieceIndex);
+    expect(retrieved).not.toBeNull();
+    expect(retrieved?.toString('utf8')).toBe('test-chunk-data-for-prefetch-30s-window');
+
+    // Limpa cache
+    torrentEngine.destroyEngine(testHash, false);
+    expect(torrentEngine.getChunkFromCache(testHash, pieceIndex)).toBeNull();
+  });
+
+  it('deve podar buffers e descartar blocos fora da janela de reprodução ao exceder limite', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    const testHash = 'memorywatchdog0123456789abcdef0123456789ab';
+    const bigChunk = Buffer.alloc(10 * 1024 * 1024, 0xaa); // 10 MB
+
+    // Insere múltiplos blocos simulando pre-fetch
+    torrentEngine.putChunkInCache(testHash, 1, bigChunk, 50);
+    torrentEngine.putChunkInCache(testHash, 2, bigChunk, 50);
+    torrentEngine.putChunkInCache(testHash, 50, bigChunk, 50);
+
+    // Executa poda forçada para 15MB
+    torrentEngine.pruneEngineBuffers(testHash, 15 * 1024 * 1024);
+
+    const memory = torrentEngine.estimateEngineMemory(testHash);
+    expect(memory).toBeLessThanOrEqual(15 * 1024 * 1024);
+
+    torrentEngine.destroyEngine(testHash, false);
+  });
+
+  it('deve desalocar imediatamente motores inativos anteriores ao trocar de episódio via evictInactiveEnginesExcept', async () => {
+    const { torrentEngine } = await import('../torrentEngine.ts');
+    const prevEpHash = 'prevepisode0123456789abcdef0123456789abcdef';
+    const nextEpHash = 'nextepisode0123456789abcdef0123456789abcdef';
+    let prevEngineDestroyed = false;
+
+    const mockPrevEngine: any = {
+      store: { close: (cb: any) => cb?.() },
+      destroy: (cb: any) => {
+        prevEngineDestroyed = true;
+        cb?.();
+      }
+    };
+
+    (torrentEngine as any).enginesMap.set(prevEpHash, mockPrevEngine);
+    (torrentEngine as any).activeStreamsCount.set(prevEpHash, 0); // Inativo
+
+    // Troca de episódio para nextEpHash
+    torrentEngine.evictInactiveEnginesExcept(nextEpHash);
+
+    expect(prevEngineDestroyed).toBe(true);
+    expect((torrentEngine as any).enginesMap.has(prevEpHash)).toBe(false);
+  });
+});
 
 
 

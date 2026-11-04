@@ -316,11 +316,15 @@ export class TranscoderQueueManager {
     if (seekSec > 0) {
       inOpts.push('-noaccurate_seek', '-ss', seekSec.toFixed(2));
     }
-    inOpts.push('-fflags', '+discardcorrupt+nobuffer');
+    inOpts.push('-fflags', '+discardcorrupt+nobuffer+genpts');
     if (isHttpInput) {
       inOpts.push('-seekable', '1', '-reconnect', '1', '-reconnect_streamed', '1');
     }
-    inOpts.push('-probesize', '196608', '-analyzeduration', '250000');
+    if (seekSec > 0) {
+      inOpts.push('-probesize', '5242880', '-analyzeduration', '5000000');
+    } else {
+      inOpts.push('-probesize', '2097152', '-analyzeduration', '2000000');
+    }
 
     const command = ffmpeg(job.inputSource);
     command.inputOptions(inOpts);
@@ -419,6 +423,119 @@ export class TranscoderQueueManager {
     });
   }
 
+  /**
+   * FASE 3: Muxing Hibrido em Tempo Real (Video 4K/1080p EN + Audio 720p PT-BR)
+   * Mapeia o video do Stream 0 (-map 0:v:0) com -c:v copy (zero custo de CPU)
+   * e o audio do Stream 1 (-map 1:a:0) convertido para AAC estereo 192k (-c:a aac -b:a 192k -ac 2)
+   * em container Fragmented MP4 (-f mp4 -movflags frag_keyframe+empty_moov+default_base_moof).
+   */
+  transcodeHybridStream(
+    videoInput: Readable | string,
+    audioInput: Readable | string,
+    outputDestination: Writable,
+    options: {
+      seekSeconds?: number;
+      audioDelayMs?: number;
+      onCancel?: () => void;
+    } = {}
+  ): { id: string; cancel: () => void; command: ffmpeg.FfmpegCommand } {
+    this.jobCounter += 1;
+    const jobId = `hybrid-${this.jobCounter}-${Date.now()}`;
+    const seekSec = options.seekSeconds && options.seekSeconds > 0 ? options.seekSeconds : 0;
+    const delayMs = options.audioDelayMs ? Math.round(options.audioDelayMs) : 0;
+
+    const buildInputOpts = (src: Readable | string) => {
+      const opts: string[] = [];
+      if (seekSec > 0) {
+        opts.push('-noaccurate_seek', '-ss', seekSec.toFixed(2));
+      }
+      opts.push('-fflags', '+discardcorrupt+nobuffer+genpts');
+      if (typeof src === 'string') {
+        opts.push('-seekable', '1', '-reconnect', '1', '-reconnect_streamed', '1');
+      }
+      if (seekSec > 0) {
+        opts.push('-probesize', '5242880', '-analyzeduration', '5000000');
+      } else {
+        opts.push('-probesize', '2097152', '-analyzeduration', '2000000');
+      }
+      return opts;
+    };
+
+    const command = ffmpeg();
+    command.input(videoInput).inputOptions(buildInputOpts(videoInput));
+    command.input(audioInput).inputOptions(buildInputOpts(audioInput));
+
+    const audioFilters: string[] = ['aresample=async=1'];
+    if (delayMs > 0) {
+      audioFilters.push(`adelay=${delayMs}|${delayMs}`);
+    }
+
+    command
+      .outputOptions([
+        '-map 0:v:0',
+        '-map 1:a:0',
+        '-sn',
+        '-dn',
+        '-c:v copy',
+        '-c:a aac',
+        '-b:a 192k',
+        '-ac 2',
+        `-af ${audioFilters.join(',')}`,
+        '-avoid_negative_ts make_zero',
+        '-max_muxing_queue_size 2048',
+        '-frag_duration 400000',
+        '-movflags frag_keyframe+empty_moov+default_base_moof'
+      ])
+      .format('mp4');
+
+    let isCleaned = false;
+    const cleanupHybrid = () => {
+      if (isCleaned) return;
+      isCleaned = true;
+      try {
+        command.kill('SIGKILL');
+      } catch {}
+      try {
+        if (typeof videoInput !== 'string') videoInput.destroy();
+      } catch {}
+      try {
+        if (typeof audioInput !== 'string') audioInput.destroy();
+      } catch {}
+      options.onCancel?.();
+    };
+
+    command.on('start', (cmdline) => {
+      console.log(`[Transcoder Hybrid Mux] Job ${jobId} iniciado: ${cmdline.slice(0, 110)}...`);
+    });
+
+    command.on('error', (err) => {
+      const msg = err?.message || '';
+      if (
+        !msg.includes('SIGKILL') &&
+        !msg.includes('Output stream closed') &&
+        !msg.includes('Premature close')
+      ) {
+        console.warn(`[Transcoder Hybrid Mux] Aviso no Job ${jobId}:`, msg);
+      }
+      cleanupHybrid();
+    });
+
+    command.on('end', () => {
+      cleanupHybrid();
+    });
+
+    outputDestination.on('close', cleanupHybrid);
+    outputDestination.on('error', cleanupHybrid);
+
+    command.pipe(outputDestination, { end: true });
+
+    return {
+      id: jobId,
+      cancel: cleanupHybrid,
+      command
+    };
+  }
+
   cancelJob(jobId: string) {
     const queueIdx = this.queue.findIndex((j) => j.id === jobId);
     if (queueIdx !== -1) {
@@ -438,14 +555,7 @@ export class TranscoderQueueManager {
       active.isDestroyed = true;
       try {
         if (active.command) {
-          active.command.kill('SIGTERM');
-          setTimeout(() => {
-            try {
-              if (active.command) {
-                active.command.kill('SIGKILL');
-              }
-            } catch {}
-          }, 300).unref();
+          active.command.kill('SIGKILL');
         }
       } catch {}
       try {

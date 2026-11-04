@@ -15,7 +15,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist dist-server popoca-cache",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "node scripts/patch-torrent-stream.cjs"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",

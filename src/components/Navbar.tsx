@@ -100,7 +100,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full px-2.5 sm:px-5 lg:px-8 pt-2.5 sm:pt-3 pb-1.5">
-      <div className="relative max-w-[1440px] mx-auto h-13 sm:h-14 px-2.5 sm:px-4 rounded-2xl sm:rounded-full glass-capsule flex items-center justify-between gap-2 sm:gap-3 transition-all duration-300">
+      <div className="relative max-w-[1440px] mx-auto h-13 sm:h-14 px-2.5 sm:px-4 rounded-2xl sm:rounded-full liquid-glass flex items-center justify-between gap-2 sm:gap-3 transition-all duration-300">
         {/* Marca Apple TV Minimalista */}
         <button
           type="button"
